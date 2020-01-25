@@ -1,35 +1,41 @@
 use crate::parser::lexer::token::Token;
 
+pub enum Stmt {
+    CreateTable(CreateTableStmt),
+    Insert(InsertStmt),
+    Select(SelectStmt),
+}
+
 // Create Table
 #[derive(Debug, Eq, PartialEq)]
 pub struct CreateTableStmt {
     pub table_name: String,
-    pub column_definitions: Vec<ColumnDefinition>,
+    pub attribute_definitions: Vec<AttributeDefinition>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct ColumnDefinition {
+pub struct AttributeDefinition {
     pub name: String,
-    pub column_type: ColumnType,
+    pub attribute_type: AttributeType,
     pub is_primary_key: bool,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum ColumnType {
+pub enum AttributeType {
     Integer,
-    Varchar,
+    Text,
 }
 
 // Insert
 #[derive(Debug, Eq, PartialEq)]
 pub struct InsertStmt {
     pub table_name: String,
-    pub column_names: Vec<String>,
-    pub column_values: Vec<ColumnValue>,
+    pub attribute_names: Vec<String>,
+    pub attribute_values: Vec<AttributeValue>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum ColumnValue {
+pub enum AttributeValue {
     String(String),
     Expr(Expr),
 }

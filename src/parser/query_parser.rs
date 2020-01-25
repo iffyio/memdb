@@ -19,23 +19,23 @@ impl Parser {
         let _ = ParseHelper::match_token(Token::Table, input.next())?;
         let table_name = ParseHelper::match_identifier(input.next())?;
         let _ = ParseHelper::match_token(Token::LeftParen, input.next())?;
-        let column_definitions = self.column_definitions(&mut input)?;
+        let attribute_definitions = self.attribute_definitions(&mut input)?;
         let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
 
         Ok(CreateTableStmt {
             table_name,
-            column_definitions,
+            attribute_definitions,
         })
     }
 
-    pub fn column_definitions(&mut self, input: &mut Input) -> Result<Vec<ColumnDefinition>> {
-        let mut column_definitions = Vec::new();
+    pub fn attribute_definitions(&mut self, input: &mut Input) -> Result<Vec<AttributeDefinition>> {
+        let mut definitions = Vec::new();
 
         loop {
             let name = ParseHelper::match_identifier(input.next())?;
-            let column_type = match input.next() {
-                Some(Token::KeywordInteger) => ColumnType::Integer,
-                Some(Token::KeywordVarchar) => ColumnType::Varchar,
+            let attribute_type = match input.next() {
+                Some(Token::KeywordInteger) => AttributeType::Integer,
+                Some(Token::KeywordVarchar) => AttributeType::Text,
                 Some(got) => {
                     return Err(ParseError::token_mismatch(
                         Token::KeywordVarchar,
@@ -52,9 +52,9 @@ impl Parser {
                 _ => false,
             };
 
-            column_definitions.push(ColumnDefinition {
+            definitions.push(AttributeDefinition {
                 name,
-                column_type,
+                attribute_type,
                 is_primary_key,
             });
 
@@ -62,7 +62,7 @@ impl Parser {
                 Some(&Token::Comma) => {
                     let _comma = input.next();
                 }
-                _ => return Ok(column_definitions),
+                _ => return Ok(definitions),
             }
         }
     }
@@ -72,17 +72,17 @@ impl Parser {
         let _ = ParseHelper::match_token(Token::KeywordInto, input.next())?;
         let table_name = ParseHelper::match_identifier(input.next())?;
         let _ = ParseHelper::match_token(Token::LeftParen, input.next())?;
-        let column_names = self.identifiers(&mut input)?;
+        let attribute_names = self.identifiers(&mut input)?;
         let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
         let _ = ParseHelper::match_token(Token::KeywordValues, input.next())?;
         let _ = ParseHelper::match_token(Token::LeftParen, input.next())?;
-        let column_values = self.column_values(&mut input)?;
+        let attribute_values = self.attribute_values(&mut input)?;
         let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
 
         Ok(InsertStmt {
             table_name,
-            column_names,
-            column_values,
+            attribute_names,
+            attribute_values,
         })
     }
 
@@ -101,16 +101,16 @@ impl Parser {
         }
     }
 
-    pub fn column_values(&mut self, input: &mut Input) -> Result<Vec<ColumnValue>> {
+    pub fn attribute_values(&mut self, input: &mut Input) -> Result<Vec<AttributeValue>> {
         let mut values = Vec::new();
 
         loop {
             let v = match input.peek() {
                 Some(&Token::StringLiteral(str)) => {
                     let _string = input.next();
-                    ColumnValue::String(str.to_owned())
+                    AttributeValue::String(str.to_owned())
                 }
-                _ => ColumnValue::Expr(ExprParser::expr(input)?),
+                _ => AttributeValue::Expr(ExprParser::expr(input)?),
             };
             values.push(v);
 
@@ -147,13 +147,13 @@ impl Parser {
                         Some(Token::Identifier(id)) => ids.push(id.clone()),
                         Some(unexpected) => {
                             return Err(ParseError::token_mismatch(
-                                Token::Identifier("<column_name>".to_owned()),
+                                Token::Identifier("<attribute_name>".to_owned()),
                                 unexpected.clone(),
                             ))
                         }
                         None => {
                             return Err(ParseError::unexpected_eof(Token::Identifier(
-                                "<column_name>".to_owned(),
+                                "<attribute_name>".to_owned(),
                             )))
                         }
                     }
@@ -219,15 +219,15 @@ mod test {
             create,
             CreateTableStmt {
                 table_name: "person".to_owned(),
-                column_definitions: vec![
-                    ColumnDefinition {
+                attribute_definitions: vec![
+                    AttributeDefinition {
                         name: "name".to_owned(),
-                        column_type: ColumnType::Varchar,
+                        attribute_type: AttributeType::Text,
                         is_primary_key: true,
                     },
-                    ColumnDefinition {
+                    AttributeDefinition {
                         name: "age".to_owned(),
-                        column_type: ColumnType::Integer,
+                        attribute_type: AttributeType::Integer,
                         is_primary_key: false,
                     }
                 ]
@@ -266,10 +266,10 @@ mod test {
             insert,
             InsertStmt {
                 table_name: "person".to_owned(),
-                column_names: vec!["name".to_owned(), "age".to_owned()],
-                column_values: vec![
-                    ColumnValue::String("bob".to_owned()),
-                    ColumnValue::Expr(Expr::Binary(BinaryExpr {
+                attribute_names: vec!["name".to_owned(), "age".to_owned()],
+                attribute_values: vec![
+                    AttributeValue::String("bob".to_owned()),
+                    AttributeValue::Expr(Expr::Binary(BinaryExpr {
                         left: Box::new(Expr::Literal(LiteralExpr::Integer(10))),
                         op: BinaryOperation::Addition,
                         right: Box::new(Expr::Literal(LiteralExpr::Integer(20))),
@@ -307,7 +307,7 @@ mod test {
     }
 
     #[test]
-    fn parse_select_columns_from() -> Result<()> {
+    fn parse_select_attributes_from() -> Result<()> {
         let mut p = Parser::new();
         let mut input = [
             Token::Select,
@@ -337,7 +337,7 @@ mod test {
     }
 
     #[test]
-    fn parse_select_columns_from_where() -> Result<()> {
+    fn parse_select_attributes_from_where() -> Result<()> {
         let mut p = Parser::new();
         let mut input = [
             Token::Select,
