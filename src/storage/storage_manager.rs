@@ -20,16 +20,45 @@ pub struct TableName(pub String);
 pub struct AttributeName(pub String);
 
 #[derive(Clone)]
-pub struct TableMetadata {
+pub struct Schema {
     pub store_id: StoreId,
     pub primary_key: AttributeName,
-    pub attribute_meta: HashMap<AttributeName, AttributeType>,
+    attributes: Vec<(AttributeName, AttributeType)>,
+}
+
+impl Schema {
+    pub fn new(
+        store_id: StoreId,
+        primary_key: AttributeName,
+        attributes: Vec<(AttributeName, AttributeType)>,
+    ) -> Self {
+        Schema {
+            store_id,
+            primary_key,
+            attributes,
+        }
+    }
+
+    pub fn num_attributes(&self) -> usize {
+        self.attributes.len()
+    }
+
+    pub fn get_attribute_type(&self, name: &AttributeName) -> Option<AttributeType> {
+        self.attributes
+            .iter()
+            .find(|(_name, _)| _name == name)
+            .map(|(_, _type)| _type.clone())
+    }
+
+    pub fn attributes_iter(&self) -> impl Iterator<Item = &(AttributeName, AttributeType)> {
+        self.attributes.iter()
+    }
 }
 
 pub struct StorageManager {
     next_store_id: StoreId,
     table_storage_directory: HashMap<StoreId, RefCell<Storage>>,
-    table_metadata: HashMap<TableName, TableMetadata>,
+    schemas: HashMap<TableName, Schema>,
 }
 
 impl StorageManager {
@@ -37,7 +66,7 @@ impl StorageManager {
         StorageManager {
             next_store_id: initial_store_id,
             table_storage_directory: HashMap::new(),
-            table_metadata: HashMap::new(),
+            schemas: HashMap::new(),
         }
     }
 
@@ -48,7 +77,7 @@ impl StorageManager {
             attributes,
         } = req;
 
-        if self.table_metadata.contains_key(&table_name) {
+        if self.schemas.contains_key(&table_name) {
             return Err(StorageError::AlreadyExists(format!(
                 "table {:?}",
                 table_name
@@ -56,13 +85,13 @@ impl StorageManager {
         }
 
         let store_id = self.create_new_store_id();
-        self.table_metadata.insert(
+        self.schemas.insert(
             table_name,
-            TableMetadata {
-                store_id: store_id.clone(),
+            Schema::new(
+                store_id.clone(),
                 primary_key,
-                attribute_meta: attributes,
-            },
+                attributes.into_iter().collect(),
+            ),
         );
 
         self.table_storage_directory.insert(
@@ -74,14 +103,14 @@ impl StorageManager {
     }
 
     pub fn get_table_store(&self, table_name: &TableName) -> Option<RefMut<Storage>> {
-        self.table_metadata
+        self.schemas
             .get(table_name)
             .and_then(|meta| self.table_storage_directory.get(&meta.store_id))
             .map(|v| v.borrow_mut())
     }
 
-    pub fn get_table_metadata(&self, table_name: &TableName) -> Option<TableMetadata> {
-        self.table_metadata.get(table_name).map(|meta| meta.clone())
+    pub fn get_schema(&self, table_name: &TableName) -> Option<Schema> {
+        self.schemas.get(table_name).map(|schema| schema.clone())
     }
 
     fn create_new_store_id(&mut self) -> StoreId {

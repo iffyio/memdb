@@ -6,6 +6,8 @@ pub enum TranslateError {
     DuplicateAttributeName(String),
     PrimaryKeyRequired,
     MultiplePrimaryKeys(Vec<String>),
+    NoSuchTable(String),
+    InvalidArguments(String),
     StorageError(Box<dyn Error>),
 }
 
@@ -18,6 +20,8 @@ impl Error for TranslateError {
                 "Only one primary key allowed but multiple keys were provided"
             }
             Self::PrimaryKeyRequired => "No primary key was provided",
+            Self::NoSuchTable(_) => "The table does not exist",
+            Self::InvalidArguments(_) => "Invalid arguments were provided to an operation",
         }
     }
 }
@@ -28,6 +32,8 @@ impl std::fmt::Display for TranslateError {
             Self::StorageError(err) => write!(f, "{}", err),
             Self::MultiplePrimaryKeys(keys) => write!(f, "{:?}", keys),
             Self::PrimaryKeyRequired => write!(f, "Primary key required"),
+            Self::NoSuchTable(name) => write!(f, "No such table [{:?}]", name),
+            Self::InvalidArguments(reason) => write!(f, "{:?}", reason),
         }
     }
 }

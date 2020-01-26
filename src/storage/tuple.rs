@@ -10,7 +10,7 @@ pub struct TupleId {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct TupleRecord(Vec<u32>);
+pub struct TupleRecord(pub Vec<u8>);
 pub struct Tuple {
     id: TupleId,
     record: TupleRecord,

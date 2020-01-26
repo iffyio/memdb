@@ -1,12 +1,10 @@
-pub(crate) mod execution;
-
-use crate::planner::plan::execution::{CreateTablePlan, ExecutionResult, InsertTuplePlan};
+use crate::planner::operation::{CreateTableOperation, ExecutionResult, InsertOperation};
 use crate::storage::storage_manager::StorageManager;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum Plan {
-    CreateTable(CreateTablePlan),
-    InsertTuple(InsertTuplePlan),
+    CreateTable(CreateTableOperation),
+    InsertTuple(InsertOperation),
 }
 
 impl Plan {

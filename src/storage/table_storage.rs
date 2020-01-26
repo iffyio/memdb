@@ -30,4 +30,8 @@ impl Storage {
     pub fn get_tuple(&self, id: &TupleId) -> Option<TupleRecord> {
         self.tuple_store.get(id).map(|tuple| tuple.clone())
     }
+
+    pub fn scan(&self) -> impl Iterator<Item = (&TupleId, &TupleRecord)> {
+        self.tuple_store.iter()
+    }
 }
