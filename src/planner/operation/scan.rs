@@ -6,7 +6,7 @@ use crate::storage::tuple::TupleRecord;
 use std::cell::RefMut;
 
 pub struct TupleIterator<'storage> {
-    inner: Box<dyn Iterator<Item = (TupleRecord)> + 'storage>,
+    inner: Box<dyn Iterator<Item = TupleRecord> + 'storage>,
 }
 
 impl<'storage> Iterator for TupleIterator<'storage> {
@@ -29,16 +29,14 @@ impl<'storage> Tuples<'storage> {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct ScanOperation {
     pub table_name: TableName,
 }
 
 impl ScanOperation {
-    pub fn execute<'storage>(
-        &self,
-        storage_manager: &'storage mut StorageManager,
-    ) -> Tuples<'storage> {
-        let mut storage = storage_manager
+    pub fn execute<'storage>(&self, storage_manager: &'storage StorageManager) -> Tuples<'storage> {
+        let storage = storage_manager
             .get_table_store(&self.table_name)
             .expect("[scan operation] table storage no longer exists?");
 
@@ -49,6 +47,7 @@ impl ScanOperation {
 #[cfg(test)]
 mod test {
     use crate::planner::operation::scan::{ScanOperation, Tuples};
+    use crate::storage::error::StorageError;
     use crate::storage::storage_manager::{
         AttributeName, CreateTableRequest, StorageManager, TableName,
     };
@@ -56,13 +55,13 @@ mod test {
     use std::collections::HashMap;
 
     #[test]
-    fn scan() {
+    fn scan() -> Result<(), StorageError> {
         let mut storage_manager = StorageManager::new(StoreId(0));
         storage_manager.create_table(CreateTableRequest {
             table_name: TableName("person".to_owned()),
             primary_key: AttributeName("name".to_owned()),
-            attributes: HashMap::new(),
-        });
+            schema_attributes: Vec::new(),
+        })?;
 
         {
             let mut store = storage_manager
@@ -77,6 +76,8 @@ mod test {
         let mut tuples = scan.execute(&mut storage_manager);
         let mut tuples = tuples.iter();
         let items = tuples.collect::<Vec<_>>();
-        assert_eq!(items, vec![Ok(TupleRecord(vec![0xca, 0xfe]))])
+        assert_eq!(items, vec![Ok(TupleRecord(vec![0xca, 0xfe]))]);
+
+        Ok(())
     }
 }

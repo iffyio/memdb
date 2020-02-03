@@ -1,10 +1,15 @@
 mod error;
+mod type_check;
 
 use crate::parser::ast::{
     AttributeDefinition, AttributeType as ParserAttributeType, AttributeType, AttributeValue,
-    BinaryExpr, BinaryOperation, CreateTableStmt, Expr, InsertStmt, LiteralExpr, Stmt,
+    BinaryExpr, BinaryOperation, CreateTableStmt, Expr, FromClause, InsertStmt, LiteralExpr,
+    SelectProperties, SelectStmt, Stmt, WhereClause,
 };
 use crate::planner::operation::{CreateTableOperation, InsertOperation};
+use crate::planner::plan::query_plan::{
+    FilterNode, ProjectNode, QueryPlan, QueryPlanNode, ScanNode,
+};
 use crate::planner::plan::Plan;
 use crate::storage::error::StorageError;
 use crate::storage::storage_manager::{
@@ -13,9 +18,10 @@ use crate::storage::storage_manager::{
 use crate::storage::tuple_serde::{serialize_tuple, StorageTupleValue};
 use crate::storage::types::AttributeType as StorageAttributeType;
 use crate::translate::error::TranslateError;
+use crate::translate::type_check::type_check_expr;
 use error::Result;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) struct Translator {
     storage_manager: StorageManager,
@@ -26,7 +32,7 @@ impl Translator {
         match stmt {
             Stmt::CreateTable(stmt) => self.translate_create_table(stmt),
             Stmt::Insert(stmt) => self.translate_insert(stmt),
-            Stmt::Select(_) => unimplemented!(),
+            Stmt::Select(stmt) => self.translate_select(stmt),
         }
     }
 
@@ -62,25 +68,30 @@ impl Translator {
 
             AttributeName(primary_keys.iter().next().unwrap().name.clone())
         };
-        let mut attributes = HashMap::new();
-
-        for col in attribute_definitions {
-            match attributes.entry(AttributeName(col.name)) {
-                Entry::Vacant(entry) => {
-                    entry.insert(Self::translate_attribute_type(col.attribute_type));
+        {
+            let mut attributes = HashSet::new();
+            for col in &attribute_definitions {
+                if attributes.contains(&col.name) {
+                    return Err(TranslateError::DuplicateAttributeName(col.name.clone()));
                 }
-                Entry::Occupied(entry) => {
-                    return Err(TranslateError::DuplicateAttributeName(
-                        entry.key().0.clone(),
-                    ));
-                }
+                attributes.insert(&col.name);
             }
         }
 
+        let schema_attributes = attribute_definitions
+            .into_iter()
+            .map(|attr| {
+                (
+                    AttributeName(attr.name),
+                    Self::translate_attribute_type(attr.attribute_type),
+                )
+            })
+            .collect();
+
         Ok(Plan::CreateTable(CreateTableOperation {
             table_name,
-            attributes,
             primary_key,
+            schema_attributes,
         }))
     }
 
@@ -92,11 +103,7 @@ impl Translator {
         } = stmt;
 
         let table_name = TableName(table_name);
-
-        let schema = match self.storage_manager.get_schema(&table_name) {
-            Some(meta) => meta,
-            None => return Err(TranslateError::NoSuchTable(table_name.0)),
-        };
+        let schema = self.get_table_schema(&table_name)?;
 
         if attribute_names.len() != attribute_values.len() {
             return Err(TranslateError::InvalidArguments(format!(
@@ -169,6 +176,10 @@ impl Translator {
                 LiteralExpr::String(s) => Ok(StorageTupleValue::String(s)),
                 LiteralExpr::Boolean(b) => Ok(StorageTupleValue::Boolean(b)),
                 LiteralExpr::Integer(i) => Ok(StorageTupleValue::Integer(i)),
+                LiteralExpr::Identifier(s) => Err(TranslateError::InvalidArguments(format!(
+                    "Identifiers cannot appear here: Found {:?}",
+                    s
+                ))),
             }
         }
         fn resolve_binary_expr(expr: BinaryExpr) -> Result<StorageTupleValue> {
@@ -235,24 +246,114 @@ impl Translator {
             AttributeValue::Expr(expr) => resolve_expr(expr),
         }
     }
+
+    fn translate_select(&mut self, stmt: SelectStmt) -> Result<Plan> {
+        let SelectStmt {
+            properties,
+            from_clause,
+            where_clause,
+        } = stmt;
+
+        let child_plan = match from_clause {
+            FromClause::Table(table_name) => {
+                let table_name = TableName(table_name);
+                let result_schema = self.get_table_schema(&table_name)?;
+                QueryPlanNode {
+                    result_schema,
+                    plan: QueryPlan::Scan(ScanNode { table_name }),
+                }
+            }
+            FromClause::Select(nested_select) => {
+                let nested_table_plan = self.translate_select(*nested_select)?;
+                match nested_table_plan {
+                    Plan::Query(plan @ QueryPlanNode { .. }) => plan,
+                    _ => unreachable!(), // TODO: Use traits for Plan instead to encode these invariants?
+                }
+            }
+        };
+
+        let plan = match where_clause {
+            WhereClause::Expr(predicate) => {
+                let ctx = child_plan.result_schema.as_lookup_table();
+                type_check_expr(&predicate, &ctx)?;
+                QueryPlanNode {
+                    result_schema: child_plan.result_schema.clone(),
+                    plan: QueryPlan::Filter(FilterNode {
+                        schema: child_plan.result_schema.clone(),
+                        predicate,
+                        child: Box::new(child_plan),
+                    }),
+                }
+            }
+            WhereClause::None => child_plan,
+        };
+
+        let plan = match properties {
+            SelectProperties::Identifiers(attr_names) => {
+                let schema = plan.result_schema.as_lookup_table();
+                match attr_names.iter().find(|attr| !schema.contains_key(attr)) {
+                    Some(attr_name) => {
+                        return Err(TranslateError::NoSuchAttribute(attr_name.clone()))
+                    }
+                    None => (),
+                }
+                let schema_attributes = attr_names
+                    .iter()
+                    .map(|attr_name| {
+                        let attr_value = schema
+                            .get(attr_name)
+                            .expect("we've verified that the schema contains this attribute");
+                        (AttributeName(attr_name.clone()), (*attr_value).clone())
+                    })
+                    .collect();
+                QueryPlanNode {
+                    result_schema: Schema::new(
+                        plan.result_schema.store_id.clone(),
+                        plan.result_schema.primary_key.clone(),
+                        schema_attributes,
+                    ),
+                    plan: QueryPlan::Project(ProjectNode {
+                        attributes: attr_names
+                            .into_iter()
+                            .map(|attr| AttributeName(attr))
+                            .collect(),
+                        child: Box::new(plan),
+                    }),
+                }
+            }
+            SelectProperties::Star => plan,
+        };
+
+        Ok(Plan::Query(plan))
+    }
+
+    fn get_table_schema(&self, table_name: &TableName) -> Result<Schema> {
+        match self.storage_manager.get_schema(table_name) {
+            Some(schema) => Ok(schema),
+            None => Err(TranslateError::NoSuchTable(table_name.0.clone())),
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::Result;
-    use crate::parser::ast::AttributeValue::Expr;
-    use crate::parser::ast::Expr::Literal;
+    use crate::parser::ast::Expr::{self, Literal};
     use crate::parser::ast::{
-        AttributeDefinition, AttributeType as ParserAttributeType, AttributeValue, CreateTableStmt,
-        InsertStmt, LiteralExpr,
+        AttributeDefinition, AttributeType as ParserAttributeType, AttributeValue, BinaryExpr,
+        BinaryOperation, CreateTableStmt, FromClause, InsertStmt, LiteralExpr, SelectProperties,
+        SelectStmt, WhereClause,
     };
     use crate::planner::operation::{CreateTableOperation, InsertOperation};
+    use crate::planner::plan::query_plan::{
+        FilterNode, ProjectNode, QueryPlan, QueryPlanNode, ScanNode,
+    };
     use crate::planner::plan::Plan::{self, CreateTable};
     use crate::storage::storage_manager::{
-        AttributeName, CreateTableRequest, StorageManager, TableName,
+        AttributeName, CreateTableRequest, Schema, StorageManager, TableName,
     };
     use crate::storage::tuple::{StoreId, TupleRecord};
-    use crate::storage::types::AttributeType as StorageAttributeType;
+    use crate::storage::types::{AttributeType as StorageAttributeType, AttributeType};
     use crate::translate::Translator;
     use std::collections::HashMap;
 
@@ -279,19 +380,15 @@ mod test {
         };
 
         let req = t.translate_create_table(stmt)?;
-
-        let mut attributes = HashMap::new();
-        attributes.insert(AttributeName("name".to_owned()), StorageAttributeType::Text);
-        attributes.insert(
-            AttributeName("age".to_owned()),
-            StorageAttributeType::Integer,
-        );
         assert_eq!(
             req,
             CreateTable(CreateTableOperation {
                 table_name: TableName("person".to_owned()),
                 primary_key: AttributeName("name".to_owned()),
-                attributes,
+                schema_attributes: vec![
+                    (AttributeName("name".to_owned()), AttributeType::Text),
+                    (AttributeName("age".to_owned()), AttributeType::Integer),
+                ]
             })
         );
 
@@ -309,18 +406,14 @@ mod test {
             ],
         };
 
-        let mut attributes = HashMap::new();
-        attributes.insert(AttributeName("name".to_owned()), StorageAttributeType::Text);
-        attributes.insert(
-            AttributeName("age".to_owned()),
-            StorageAttributeType::Integer,
-        );
-
         let mut storage_manager = StorageManager::new(StoreId(0));
         storage_manager.create_table(CreateTableRequest {
             table_name: TableName("person".to_owned()),
             primary_key: AttributeName("name".to_owned()),
-            attributes,
+            schema_attributes: vec![
+                (AttributeName("name".to_owned()), AttributeType::Text),
+                (AttributeName("age".to_owned()), AttributeType::Integer),
+            ],
         })?;
         let mut t = Translator { storage_manager };
 
@@ -330,6 +423,149 @@ mod test {
             Plan::InsertTuple(InsertOperation {
                 table_name: TableName("person".to_owned()),
                 tuple: TupleRecord(vec![0, 0, 0, 3, 98, 111, 98, 0, 0, 0, 20])
+            })
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn translate_select_star() -> Result<()> {
+        let predicate = Expr::Binary(BinaryExpr {
+            left: Box::new(Expr::Literal(LiteralExpr::Identifier("age".to_owned()))),
+            op: BinaryOperation::NotEqual,
+            right: Box::new(Expr::Binary(BinaryExpr {
+                left: Box::new(Expr::Literal(LiteralExpr::Integer(8))),
+                op: BinaryOperation::Addition,
+                right: Box::new(Expr::Literal(LiteralExpr::Integer(2))),
+            })),
+        });
+        let stmt = SelectStmt {
+            properties: SelectProperties::Star,
+            from_clause: FromClause::Table("person".to_owned()),
+            where_clause: WhereClause::Expr(predicate.clone()),
+        };
+
+        let schema_attributes = vec![
+            (AttributeName("name".to_owned()), AttributeType::Text),
+            (AttributeName("age".to_owned()), AttributeType::Integer),
+        ];
+
+        let mut storage_manager = StorageManager::new(StoreId(0));
+        storage_manager.create_table(CreateTableRequest {
+            table_name: TableName("person".to_owned()),
+            primary_key: AttributeName("name".to_owned()),
+            schema_attributes: schema_attributes.clone(),
+        })?;
+
+        let mut t = Translator { storage_manager };
+
+        let plan = t.translate_select(stmt)?;
+
+        let schema = Schema::new(
+            StoreId(0),
+            AttributeName("name".to_owned()),
+            schema_attributes.clone(),
+        );
+        assert_eq!(
+            plan,
+            Plan::Query(QueryPlanNode {
+                result_schema: schema.clone(),
+                plan: QueryPlan::Filter(FilterNode {
+                    predicate: predicate.clone(),
+                    schema: schema.clone(),
+                    child: Box::new(QueryPlanNode {
+                        result_schema: schema.clone(),
+                        plan: QueryPlan::Scan(ScanNode {
+                            table_name: TableName("person".to_owned())
+                        })
+                    })
+                })
+            })
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn translate_projection() -> Result<()> {
+        let predicate = Expr::Binary(BinaryExpr {
+            left: Box::new(Expr::Literal(LiteralExpr::Identifier("age".to_owned()))),
+            op: BinaryOperation::NotEqual,
+            right: Box::new(Expr::Binary(BinaryExpr {
+                left: Box::new(Expr::Literal(LiteralExpr::Integer(8))),
+                op: BinaryOperation::Addition,
+                right: Box::new(Expr::Literal(LiteralExpr::Integer(2))),
+            })),
+        });
+        let stmt = SelectStmt {
+            properties: SelectProperties::Identifiers(vec![
+                "is_member".to_owned(),
+                "age".to_owned(),
+            ]),
+            from_clause: FromClause::Table("person".to_owned()),
+            where_clause: WhereClause::Expr(predicate.clone()),
+        };
+
+        let schema_attributes = vec![
+            (AttributeName("name".to_owned()), AttributeType::Text),
+            (AttributeName("age".to_owned()), AttributeType::Integer),
+            (AttributeName("location".to_owned()), AttributeType::Text),
+            (
+                AttributeName("is_member".to_owned()),
+                AttributeType::Boolean,
+            ),
+        ];
+
+        let mut storage_manager = StorageManager::new(StoreId(0));
+        storage_manager.create_table(CreateTableRequest {
+            table_name: TableName("person".to_owned()),
+            primary_key: AttributeName("name".to_owned()),
+            schema_attributes: schema_attributes.clone(),
+        })?;
+
+        let mut t = Translator { storage_manager };
+
+        let plan = t.translate_select(stmt)?;
+
+        let schema = Schema::new(
+            StoreId(0),
+            AttributeName("name".to_owned()),
+            schema_attributes.clone(),
+        );
+        assert_eq!(
+            plan,
+            Plan::Query(QueryPlanNode {
+                result_schema: Schema::new(
+                    StoreId(0),
+                    AttributeName("name".to_owned()),
+                    vec![
+                        (
+                            AttributeName("is_member".to_owned()),
+                            AttributeType::Boolean
+                        ),
+                        (AttributeName("age".to_owned()), AttributeType::Integer)
+                    ]
+                ),
+                plan: QueryPlan::Project(ProjectNode {
+                    attributes: vec![
+                        AttributeName("is_member".to_owned()),
+                        AttributeName("age".to_owned())
+                    ],
+                    child: Box::new(QueryPlanNode {
+                        result_schema: schema.clone(),
+                        plan: QueryPlan::Filter(FilterNode {
+                            predicate: predicate.clone(),
+                            schema: schema.clone(),
+                            child: Box::new(QueryPlanNode {
+                                result_schema: schema.clone(),
+                                plan: QueryPlan::Scan(ScanNode {
+                                    table_name: TableName("person".to_owned())
+                                })
+                            })
+                        })
+                    })
+                })
             })
         );
 

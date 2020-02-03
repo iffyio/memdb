@@ -2,15 +2,15 @@ use crate::storage::error::{Result, StorageError};
 use crate::storage::table_storage::Storage;
 use crate::storage::tuple::StoreId;
 use crate::storage::types::AttributeType;
-use std::borrow::BorrowMut;
 use std::cell::{RefCell, RefMut};
+use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct CreateTableRequest {
     pub table_name: TableName,
     pub primary_key: AttributeName,
-    pub attributes: HashMap<AttributeName, AttributeType>,
+    pub schema_attributes: Vec<(AttributeName, AttributeType)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -19,7 +19,7 @@ pub struct TableName(pub String);
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AttributeName(pub String);
 
-#[derive(Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Schema {
     pub store_id: StoreId,
     pub primary_key: AttributeName,
@@ -53,6 +53,12 @@ impl Schema {
     pub fn attributes_iter(&self) -> impl Iterator<Item = &(AttributeName, AttributeType)> {
         self.attributes.iter()
     }
+
+    pub fn as_lookup_table(&self) -> HashMap<&String, &AttributeType> {
+        self.attributes_iter()
+            .map(|(attr_name, attr_type)| (&attr_name.0, attr_type))
+            .collect()
+    }
 }
 
 pub struct StorageManager {
@@ -74,7 +80,7 @@ impl StorageManager {
         let CreateTableRequest {
             table_name,
             primary_key,
-            attributes,
+            schema_attributes,
         } = req;
 
         if self.schemas.contains_key(&table_name) {
@@ -90,7 +96,7 @@ impl StorageManager {
             Schema::new(
                 store_id.clone(),
                 primary_key,
-                attributes.into_iter().collect(),
+                schema_attributes.into_iter().collect(),
             ),
         );
 

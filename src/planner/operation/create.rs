@@ -9,7 +9,7 @@ use std::collections::HashMap;
 pub struct CreateTableOperation {
     pub table_name: TableName,
     pub primary_key: AttributeName,
-    pub attributes: HashMap<AttributeName, AttributeType>,
+    pub schema_attributes: Vec<(AttributeName, AttributeType)>,
 }
 
 impl CreateTableOperation {
@@ -17,7 +17,7 @@ impl CreateTableOperation {
         storage_manager.create_table(CreateTableRequest {
             table_name: self.table_name,
             primary_key: self.primary_key,
-            attributes: self.attributes,
+            schema_attributes: self.schema_attributes,
         })?;
         Ok(Vec::new())
     }

@@ -66,7 +66,7 @@ pub enum WhereClause {
     Expr(Expr),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum BinaryOperation {
     Addition,
     Subtraction,
@@ -97,21 +97,22 @@ impl From<Token> for BinaryOperation {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct BinaryExpr {
     pub left: Box<Expr>,
     pub op: BinaryOperation,
     pub right: Box<Expr>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum LiteralExpr {
     Integer(i32),
     Boolean(bool),
     String(String),
+    Identifier(String),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Expr {
     Binary(BinaryExpr),
     Literal(LiteralExpr),
