@@ -135,9 +135,9 @@ impl FilterOperation {
 
 #[cfg(test)]
 mod test {
+    use crate::execution::filter::FilterOperation;
     use crate::parser::ast::Expr::{self, Binary};
     use crate::parser::ast::{BinaryExpr, BinaryOperation, LiteralExpr};
-    use crate::planner::operation::filter::FilterOperation;
     use crate::storage::storage_manager::{AttributeName, Schema};
     use crate::storage::tuple::StoreId;
     use crate::storage::tuple_serde::{deserialize_tuple, serialize_tuple, StorageTupleValue};

@@ -6,7 +6,8 @@ use crate::parser::ast::{
     BinaryExpr, BinaryOperation, CreateTableStmt, Expr, FromClause, InsertStmt, LiteralExpr,
     SelectProperties, SelectStmt, Stmt, WhereClause,
 };
-use crate::planner::operation::{CreateTableOperation, InsertOperation};
+use crate::planner::plan::create_plan::CreateTablePlan;
+use crate::planner::plan::insert_plan::InsertTuplePlan;
 use crate::planner::plan::query_plan::{
     FilterNode, ProjectNode, QueryPlan, QueryPlanNode, ScanNode,
 };
@@ -88,7 +89,7 @@ impl Translator {
             })
             .collect();
 
-        Ok(Plan::CreateTable(CreateTableOperation {
+        Ok(Plan::CreateTable(CreateTablePlan {
             table_name,
             primary_key,
             schema_attributes,
@@ -157,7 +158,7 @@ impl Translator {
             }
         }
 
-        Ok(Plan::InsertTuple(InsertOperation {
+        Ok(Plan::InsertTuple(InsertTuplePlan {
             table_name,
             tuple: serialize_tuple(resolved_attribute_values),
         }))
@@ -258,15 +259,15 @@ impl Translator {
             FromClause::Table(table_name) => {
                 let table_name = TableName(table_name);
                 let result_schema = self.get_table_schema(&table_name)?;
-                QueryPlanNode {
+                QueryPlan {
                     result_schema,
-                    plan: QueryPlan::Scan(ScanNode { table_name }),
+                    plan: QueryPlanNode::Scan(ScanNode { table_name }),
                 }
             }
             FromClause::Select(nested_select) => {
                 let nested_table_plan = self.translate_select(*nested_select)?;
                 match nested_table_plan {
-                    Plan::Query(plan @ QueryPlanNode { .. }) => plan,
+                    Plan::Query(plan @ QueryPlan { .. }) => plan,
                     _ => unreachable!(), // TODO: Use traits for Plan instead to encode these invariants?
                 }
             }
@@ -276,9 +277,9 @@ impl Translator {
             WhereClause::Expr(predicate) => {
                 let ctx = child_plan.result_schema.as_lookup_table();
                 type_check_expr(&predicate, &ctx)?;
-                QueryPlanNode {
+                QueryPlan {
                     result_schema: child_plan.result_schema.clone(),
-                    plan: QueryPlan::Filter(FilterNode {
+                    plan: QueryPlanNode::Filter(FilterNode {
                         schema: child_plan.result_schema.clone(),
                         predicate,
                         child: Box::new(child_plan),
@@ -306,13 +307,13 @@ impl Translator {
                         (AttributeName(attr_name.clone()), (*attr_value).clone())
                     })
                     .collect();
-                QueryPlanNode {
+                QueryPlan {
                     result_schema: Schema::new(
                         plan.result_schema.store_id.clone(),
                         plan.result_schema.primary_key.clone(),
                         schema_attributes,
                     ),
-                    plan: QueryPlan::Project(ProjectNode {
+                    plan: QueryPlanNode::Project(ProjectNode {
                         attributes: attr_names
                             .into_iter()
                             .map(|attr| AttributeName(attr))
@@ -344,7 +345,8 @@ mod test {
         BinaryOperation, CreateTableStmt, FromClause, InsertStmt, LiteralExpr, SelectProperties,
         SelectStmt, WhereClause,
     };
-    use crate::planner::operation::{CreateTableOperation, InsertOperation};
+    use crate::planner::plan::create_plan::CreateTablePlan;
+    use crate::planner::plan::insert_plan::InsertTuplePlan;
     use crate::planner::plan::query_plan::{
         FilterNode, ProjectNode, QueryPlan, QueryPlanNode, ScanNode,
     };
@@ -382,7 +384,7 @@ mod test {
         let req = t.translate_create_table(stmt)?;
         assert_eq!(
             req,
-            CreateTable(CreateTableOperation {
+            CreateTable(CreateTablePlan {
                 table_name: TableName("person".to_owned()),
                 primary_key: AttributeName("name".to_owned()),
                 schema_attributes: vec![
@@ -420,7 +422,7 @@ mod test {
         let plan = t.translate_insert(stmt)?;
         assert_eq!(
             plan,
-            Plan::InsertTuple(InsertOperation {
+            Plan::InsertTuple(InsertTuplePlan {
                 table_name: TableName("person".to_owned()),
                 tuple: TupleRecord(vec![0, 0, 0, 3, 98, 111, 98, 0, 0, 0, 20])
             })
@@ -469,14 +471,14 @@ mod test {
         );
         assert_eq!(
             plan,
-            Plan::Query(QueryPlanNode {
+            Plan::Query(QueryPlan {
                 result_schema: schema.clone(),
-                plan: QueryPlan::Filter(FilterNode {
+                plan: QueryPlanNode::Filter(FilterNode {
                     predicate: predicate.clone(),
                     schema: schema.clone(),
-                    child: Box::new(QueryPlanNode {
+                    child: Box::new(QueryPlan {
                         result_schema: schema.clone(),
-                        plan: QueryPlan::Scan(ScanNode {
+                        plan: QueryPlanNode::Scan(ScanNode {
                             table_name: TableName("person".to_owned())
                         })
                     })
@@ -535,7 +537,7 @@ mod test {
         );
         assert_eq!(
             plan,
-            Plan::Query(QueryPlanNode {
+            Plan::Query(QueryPlan {
                 result_schema: Schema::new(
                     StoreId(0),
                     AttributeName("name".to_owned()),
@@ -547,19 +549,19 @@ mod test {
                         (AttributeName("age".to_owned()), AttributeType::Integer)
                     ]
                 ),
-                plan: QueryPlan::Project(ProjectNode {
+                plan: QueryPlanNode::Project(ProjectNode {
                     attributes: vec![
                         AttributeName("is_member".to_owned()),
                         AttributeName("age".to_owned())
                     ],
-                    child: Box::new(QueryPlanNode {
+                    child: Box::new(QueryPlan {
                         result_schema: schema.clone(),
-                        plan: QueryPlan::Filter(FilterNode {
+                        plan: QueryPlanNode::Filter(FilterNode {
                             predicate: predicate.clone(),
                             schema: schema.clone(),
-                            child: Box::new(QueryPlanNode {
+                            child: Box::new(QueryPlan {
                                 result_schema: schema.clone(),
-                                plan: QueryPlan::Scan(ScanNode {
+                                plan: QueryPlanNode::Scan(ScanNode {
                                     table_name: TableName("person".to_owned())
                                 })
                             })

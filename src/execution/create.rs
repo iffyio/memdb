@@ -1,4 +1,4 @@
-use crate::planner::operation::ExecutionResult;
+use crate::execution::ExecutionResult;
 use crate::storage::storage_manager::{
     AttributeName, CreateTableRequest, StorageManager, TableName,
 };

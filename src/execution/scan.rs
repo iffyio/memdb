@@ -1,4 +1,4 @@
-use crate::planner::operation::ExecutionResult;
+use crate::execution::ExecutionResult;
 use crate::storage::error::Result as StorageResult;
 use crate::storage::storage_manager::{StorageManager, TableName};
 use crate::storage::table_storage::Storage;
@@ -46,7 +46,8 @@ impl ScanOperation {
 
 #[cfg(test)]
 mod test {
-    use crate::planner::operation::scan::{ScanOperation, Tuples};
+    use crate::execution::scan::Tuples;
+    use crate::execution::ScanOperation;
     use crate::storage::error::StorageError;
     use crate::storage::storage_manager::{
         AttributeName, CreateTableRequest, StorageManager, TableName,
@@ -73,8 +74,8 @@ mod test {
         let scan = ScanOperation {
             table_name: TableName("person".to_owned()),
         };
-        let mut tuples = scan.execute(&mut storage_manager);
-        let mut tuples = tuples.iter();
+        let mut tuples = scan.execute(&storage_manager);
+        let tuples = tuples.iter();
         let items = tuples.collect::<Vec<_>>();
         assert_eq!(items, vec![Ok(TupleRecord(vec![0xca, 0xfe]))]);
 
