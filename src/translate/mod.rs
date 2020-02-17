@@ -307,13 +307,15 @@ impl Translator {
                         (AttributeName(attr_name.clone()), (*attr_value).clone())
                     })
                     .collect();
+                let result_schema = Schema::new(
+                    plan.result_schema.store_id.clone(),
+                    plan.result_schema.primary_key.clone(),
+                    schema_attributes,
+                );
                 QueryPlan {
-                    result_schema: Schema::new(
-                        plan.result_schema.store_id.clone(),
-                        plan.result_schema.primary_key.clone(),
-                        schema_attributes,
-                    ),
+                    result_schema: result_schema.clone(),
                     plan: QueryPlanNode::Project(ProjectNode {
+                        record_schema: result_schema.clone(),
                         attributes: attr_names
                             .into_iter()
                             .map(|attr| AttributeName(attr))
@@ -535,21 +537,23 @@ mod test {
             AttributeName("name".to_owned()),
             schema_attributes.clone(),
         );
+        let result_schema = Schema::new(
+            StoreId(0),
+            AttributeName("name".to_owned()),
+            vec![
+                (
+                    AttributeName("is_member".to_owned()),
+                    AttributeType::Boolean,
+                ),
+                (AttributeName("age".to_owned()), AttributeType::Integer),
+            ],
+        );
         assert_eq!(
             plan,
             Plan::Query(QueryPlan {
-                result_schema: Schema::new(
-                    StoreId(0),
-                    AttributeName("name".to_owned()),
-                    vec![
-                        (
-                            AttributeName("is_member".to_owned()),
-                            AttributeType::Boolean
-                        ),
-                        (AttributeName("age".to_owned()), AttributeType::Integer)
-                    ]
-                ),
+                result_schema: result_schema.clone(),
                 plan: QueryPlanNode::Project(ProjectNode {
+                    record_schema: result_schema.clone(),
                     attributes: vec![
                         AttributeName("is_member".to_owned()),
                         AttributeName("age".to_owned())

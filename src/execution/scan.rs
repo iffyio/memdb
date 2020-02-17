@@ -1,8 +1,8 @@
-use crate::execution::ExecutionResult;
+use crate::execution::{EmptyResult, NextTuple, TupleResult};
 use crate::storage::error::Result as StorageResult;
 use crate::storage::storage_manager::{StorageManager, TableName};
 use crate::storage::table_storage::Storage;
-use crate::storage::tuple::TupleRecord;
+use crate::storage::tuple::{Tuple, TupleRecord};
 use std::cell::RefMut;
 
 pub struct TupleIterator<'storage> {
@@ -31,23 +31,33 @@ impl<'storage> Tuples<'storage> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ScanOperation {
-    pub table_name: TableName,
+    tuples: Vec<TupleRecord>,
+    index: usize,
+}
+
+impl NextTuple for ScanOperation {
+    fn next(&mut self) -> TupleResult {
+        if self.index < self.tuples.len() {
+            // TODO we don't clone since we don't need the tuple after returning it.
+            let t = self.tuples[self.index].clone();
+            self.index += 1;
+            Some(Ok(t))
+        } else {
+            None
+        }
+    }
 }
 
 impl ScanOperation {
-    pub fn execute<'storage>(&self, storage_manager: &'storage StorageManager) -> Tuples<'storage> {
-        let storage = storage_manager
-            .get_table_store(&self.table_name)
-            .expect("[scan operation] table storage no longer exists?");
-
-        Tuples { storage }
+    pub fn new(tuples: Vec<TupleRecord>) -> Self {
+        ScanOperation { tuples, index: 0 }
     }
 }
 
 #[cfg(test)]
 mod test {
     use crate::execution::scan::Tuples;
-    use crate::execution::ScanOperation;
+    use crate::execution::{NextTuple, ScanOperation};
     use crate::storage::error::StorageError;
     use crate::storage::storage_manager::{
         AttributeName, CreateTableRequest, StorageManager, TableName,
@@ -57,26 +67,11 @@ mod test {
 
     #[test]
     fn scan() -> Result<(), StorageError> {
-        let mut storage_manager = StorageManager::new(StoreId(0));
-        storage_manager.create_table(CreateTableRequest {
-            table_name: TableName("person".to_owned()),
-            primary_key: AttributeName("name".to_owned()),
-            schema_attributes: Vec::new(),
-        })?;
-
-        {
-            let mut store = storage_manager
-                .get_table_store(&TableName("person".to_owned()))
-                .unwrap();
-            store.insert_tuple(TupleRecord(vec![0xca, 0xfe]));
+        let mut scan = ScanOperation::new(vec![TupleRecord(vec![0xca, 0xfe])]);
+        let mut items = Vec::new();
+        while let Some(item) = scan.next() {
+            items.push(item)
         }
-
-        let scan = ScanOperation {
-            table_name: TableName("person".to_owned()),
-        };
-        let mut tuples = scan.execute(&storage_manager);
-        let tuples = tuples.iter();
-        let items = tuples.collect::<Vec<_>>();
         assert_eq!(items, vec![Ok(TupleRecord(vec![0xca, 0xfe]))]);
 
         Ok(())

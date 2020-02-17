@@ -1,3 +1,4 @@
+mod evaluate;
 mod execution;
 mod parser;
 mod planner;

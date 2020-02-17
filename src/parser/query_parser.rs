@@ -7,7 +7,7 @@ use crate::parser::expr_parser::Parser as ExprParser;
 use crate::parser::lexer::token::Token;
 use crate::parser::parse::{Input, ParseError, ParseHelper, Result};
 
-struct Parser {}
+struct Parser;
 
 impl Parser {
     pub fn new() -> Self {

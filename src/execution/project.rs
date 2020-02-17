@@ -1,28 +1,22 @@
-use crate::storage::error::Result as StorageResult;
+use crate::execution::NextTuple;
+use crate::storage::error::{Result as StorageResult, StorageError};
 use crate::storage::storage_manager::{AttributeName, Schema};
 use crate::storage::tuple::TupleRecord;
 use crate::storage::tuple_serde::serialize_tuple;
 
-#[derive(Debug, Eq, PartialEq)]
 pub struct ProjectOperation {
     pub record_schema: Schema,
     pub projected_attributes: Vec<AttributeName>,
+    pub input: Box<dyn NextTuple>,
 }
 
-impl ProjectOperation {
-    pub fn execute<'a, T: 'a>(
-        self,
-        input: T,
-    ) -> impl Iterator<Item = StorageResult<TupleRecord>> + 'a
-    where
-        T: Iterator<Item = StorageResult<TupleRecord>>,
-    {
-        let schema = self.record_schema;
-        let attributes = self.projected_attributes;
-        input.map(move |result| {
+impl NextTuple for ProjectOperation {
+    fn next(&mut self) -> Option<Result<TupleRecord, StorageError>> {
+        self.input.next().map(|result| {
             result.and_then(|record| {
-                let value_by_attr = record.to_values(schema.attributes_iter())?;
-                let projected_values = attributes
+                let value_by_attr = record.to_values(self.record_schema.attributes_iter())?;
+                let projected_values = self
+                    .projected_attributes
                     .iter()
                     .map(|attr_name| {
                         value_by_attr
@@ -41,7 +35,7 @@ impl ProjectOperation {
 #[cfg(test)]
 mod test {
     use crate::execution::filter::FilterOperation;
-    use crate::execution::ProjectOperation;
+    use crate::execution::{NextTuple, ProjectOperation, ScanOperation};
     use crate::parser::ast::Expr::{self, Binary};
     use crate::parser::ast::{BinaryExpr, BinaryOperation, LiteralExpr};
     use crate::storage::storage_manager::{AttributeName, Schema};
@@ -75,46 +69,45 @@ mod test {
                 (AttributeName("age".to_owned()), AttributeType::Integer),
             ],
         );
-        let p = ProjectOperation {
+        let mut input = ScanOperation::new(vec![
+            serialize_tuple(vec![
+                StorageTupleValue::String("a".to_owned()),
+                StorageTupleValue::Integer(11),
+                StorageTupleValue::String("locA".to_owned()),
+                StorageTupleValue::Boolean(true),
+            ]),
+            serialize_tuple(vec![
+                StorageTupleValue::String("b".to_owned()),
+                StorageTupleValue::Integer(10),
+                StorageTupleValue::String("locB".to_owned()),
+                StorageTupleValue::Boolean(false),
+            ]),
+            serialize_tuple(vec![
+                StorageTupleValue::String("c".to_owned()),
+                StorageTupleValue::Integer(12),
+                StorageTupleValue::String("locC".to_owned()),
+                StorageTupleValue::Boolean(false),
+            ]),
+            serialize_tuple(vec![
+                StorageTupleValue::String("d".to_owned()),
+                StorageTupleValue::Integer(9),
+                StorageTupleValue::String("locD".to_owned()),
+                StorageTupleValue::Boolean(true),
+            ]),
+        ]);
+        let mut p = ProjectOperation {
             record_schema: schema.clone(),
             projected_attributes: vec![
                 AttributeName("is_member".to_owned()),
                 AttributeName("age".to_owned()),
             ],
+            input: Box::new(input),
         };
 
-        let projected_tuples = p
-            .execute(
-                vec![
-                    serialize_tuple(vec![
-                        StorageTupleValue::String("a".to_owned()),
-                        StorageTupleValue::Integer(11),
-                        StorageTupleValue::String("locA".to_owned()),
-                        StorageTupleValue::Boolean(true),
-                    ]),
-                    serialize_tuple(vec![
-                        StorageTupleValue::String("b".to_owned()),
-                        StorageTupleValue::Integer(10),
-                        StorageTupleValue::String("locB".to_owned()),
-                        StorageTupleValue::Boolean(false),
-                    ]),
-                    serialize_tuple(vec![
-                        StorageTupleValue::String("c".to_owned()),
-                        StorageTupleValue::Integer(12),
-                        StorageTupleValue::String("locC".to_owned()),
-                        StorageTupleValue::Boolean(false),
-                    ]),
-                    serialize_tuple(vec![
-                        StorageTupleValue::String("d".to_owned()),
-                        StorageTupleValue::Integer(9),
-                        StorageTupleValue::String("locD".to_owned()),
-                        StorageTupleValue::Boolean(true),
-                    ]),
-                ]
-                .into_iter()
-                .map(|t| Ok(t)),
-            )
-            .collect::<Vec<_>>();
+        let mut projected_tuples = Vec::new();
+        while let Some(tuple) = p.next() {
+            projected_tuples.push(tuple)
+        }
         assert_eq!(
             projected_tuples
                 .into_iter()

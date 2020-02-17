@@ -1,6 +1,6 @@
 use crate::storage::error::{Result, StorageError};
 use crate::storage::table_storage::Storage;
-use crate::storage::tuple::StoreId;
+use crate::storage::tuple::{StoreId, TupleRecord};
 use crate::storage::types::AttributeType;
 use std::cell::{RefCell, RefMut};
 use std::collections::hash_map::RandomState;

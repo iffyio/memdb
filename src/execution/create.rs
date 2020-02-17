@@ -1,4 +1,4 @@
-use crate::execution::ExecutionResult;
+use crate::execution::EmptyResult;
 use crate::storage::storage_manager::{
     AttributeName, CreateTableRequest, StorageManager, TableName,
 };
@@ -13,12 +13,12 @@ pub struct CreateTableOperation {
 }
 
 impl CreateTableOperation {
-    pub fn execute(self, storage_manager: &mut StorageManager) -> ExecutionResult {
+    pub fn execute(self, storage_manager: &mut StorageManager) -> EmptyResult {
         storage_manager.create_table(CreateTableRequest {
             table_name: self.table_name,
             primary_key: self.primary_key,
             schema_attributes: self.schema_attributes,
         })?;
-        Ok(Vec::new())
+        Ok(())
     }
 }

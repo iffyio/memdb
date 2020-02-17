@@ -15,6 +15,7 @@ pub(crate) struct FilterNode {
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct ProjectNode {
+    pub record_schema: Schema,
     pub attributes: Vec<AttributeName>,
     pub child: Box<QueryPlan>,
 }

@@ -2,13 +2,13 @@ mod create_table_execution_plan;
 mod insert_tuple_execution_plan;
 mod query_execution_plan;
 
-use crate::planner::optimizer::create_table_execution_plan::CreateTableExecutionPlan;
-use crate::planner::optimizer::insert_tuple_execution_plan::InsertTupleExecutionPlan;
-use crate::planner::optimizer::query_execution_plan::QueryExecutionPlan;
-use crate::planner::plan::create_plan::CreateTablePlan;
-use crate::planner::plan::insert_plan::InsertTuplePlan;
-use crate::planner::plan::query_plan::QueryPlan;
-use crate::planner::plan::Plan;
+pub(crate) use crate::planner::optimizer::create_table_execution_plan::CreateTableExecutionPlan;
+pub(crate) use crate::planner::optimizer::insert_tuple_execution_plan::InsertTupleExecutionPlan;
+pub(crate) use crate::planner::optimizer::query_execution_plan::QueryExecutionPlan;
+pub(crate) use crate::planner::plan::create_plan::CreateTablePlan;
+pub(crate) use crate::planner::plan::insert_plan::InsertTuplePlan;
+pub(crate) use crate::planner::plan::query_plan::QueryPlan;
+pub(crate) use crate::planner::plan::Plan;
 
 pub(crate) enum ExecutionPlan {
     CreateTable(create_table_execution_plan::CreateTableExecutionPlan),
