@@ -1,3 +1,5 @@
+mod db;
+
 use crate::execution::{
     CreateTableOperation, EmptyResult, Engine, FilterOperation, InsertTupleOperation, NextTuple,
     Operation, ProjectOperation, ScanOperation, TupleResult,
@@ -9,21 +11,28 @@ use crate::planner::plan::query_plan::QueryPlanNode::Project;
 use crate::planner::plan::query_plan::{FilterNode, ProjectNode, QueryPlanNode, ScanNode};
 use crate::planner::ExecutionPlan;
 use crate::storage::error::{Result as StorageResult, StorageError};
-use crate::storage::storage_manager::StorageManager;
+use crate::storage::storage_manager::{AttributeName, Schema, StorageManager};
 use crate::storage::tuple::TupleRecord;
+use crate::storage::tuple_serde::StorageTupleValue;
+use std::collections::HashMap;
 
 // Interface between optimizer and execution engine
-struct Evaluation<'engine> {
-    engine: &'engine mut Engine,
+pub(crate) struct Evaluation<'storage> {
+    pub engine: Engine<'storage>,
 }
 
-struct EvaluationResult {
-    pub input: Box<dyn NextTuple>,
+pub(crate) struct EvaluationResult {
+    schema: Option<Schema>,
+    input: Box<dyn NextTuple>,
 }
 
-impl NextTuple for EvaluationResult {
-    fn next(&mut self) -> TupleResult {
-        self.input.next()
+impl EvaluationResult {
+    pub fn next(&mut self) -> Option<StorageResult<Vec<(AttributeName, StorageTupleValue)>>> {
+        self.input.next().map(|tuple| {
+            tuple.and_then(|tuple| {
+                Ok(tuple.to_values(self.schema.as_ref().unwrap().attributes_iter())?)
+            })
+        })
     }
 }
 
@@ -42,6 +51,7 @@ impl From<EmptyResult> for EvaluationResult {
         }
 
         EvaluationResult {
+            schema: None,
             input: Box::new(EmptyResultIterator {
                 result: Some(result),
             }),
@@ -49,8 +59,9 @@ impl From<EmptyResult> for EvaluationResult {
     }
 }
 
-impl Evaluation<'_> {
+impl<'storage> Evaluation<'storage> {
     pub fn evaluate(&mut self, plan: ExecutionPlan) -> EvaluationResult {
+        let schema = plan.result_schema();
         match plan {
             ExecutionPlan::CreateTable(CreateTableExecutionPlan {
                 table_name,
@@ -74,16 +85,19 @@ impl Evaluation<'_> {
             ExecutionPlan::Query(QueryExecutionPlan {
                 plan: QueryPlanNode::Scan(node),
             }) => EvaluationResult {
+                schema,
                 input: Box::new(self.evaluate_scan(node)),
             },
             ExecutionPlan::Query(QueryExecutionPlan {
                 plan: QueryPlanNode::Filter(node),
             }) => EvaluationResult {
+                schema,
                 input: Box::new(self.evaluate_filter(node)),
             },
             ExecutionPlan::Query(QueryExecutionPlan {
                 plan: QueryPlanNode::Project(node),
             }) => EvaluationResult {
+                schema,
                 input: Box::new(self.evaluate_project(node)),
             },
         }
@@ -126,6 +140,7 @@ impl Evaluation<'_> {
             record_schema,
             attributes,
             child,
+            ..
         } = node;
 
         match child.plan {

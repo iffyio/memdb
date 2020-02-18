@@ -6,7 +6,7 @@ use std::slice::Iter;
 
 #[derive(Debug)]
 pub struct ParseError {
-    details: String,
+    pub details: String,
 }
 
 impl ParseError {

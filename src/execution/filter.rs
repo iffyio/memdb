@@ -1,5 +1,5 @@
 use crate::execution::{NextTuple, TupleResult};
-use crate::parser::ast::{AttributeType, BinaryOperation, Expr, LiteralExpr};
+use crate::parser::ast::{BinaryOperation, Expr, LiteralExpr};
 use crate::storage::error::{Result as StorageResult, StorageError};
 use crate::storage::storage_manager::{AttributeName, Schema, StorageManager};
 use crate::storage::tuple::TupleRecord;
@@ -16,22 +16,24 @@ impl NextTuple for FilterOperation {
     fn next(&mut self) -> TupleResult {
         loop {
             match self.input.next() {
-                Some(Ok(record)) => match record.to_values(self.schema.attributes_iter()) {
-                    Ok(tuple_values) => {
-                        let forward = FilterOperation::evaluate_predicate_with_ctx(
-                            &self.predicate,
-                            tuple_values
-                                .into_iter()
-                                .map(|(attr_name, attr_type)| (attr_name.0, attr_type))
-                                .collect(),
-                        );
+                Some(Ok(record)) => {
+                    match record.to_values::<_, HashMap<_, _>>(self.schema.attributes_iter()) {
+                        Ok(tuple_values) => {
+                            let forward = FilterOperation::evaluate_predicate_with_ctx(
+                                &self.predicate,
+                                tuple_values
+                                    .into_iter()
+                                    .map(|(attr_name, attr_type)| (attr_name.0, attr_type))
+                                    .collect(),
+                            );
 
-                        if forward {
-                            return Some(Ok(record));
+                            if forward {
+                                return Some(Ok(record));
+                            }
                         }
+                        Err(err) => return Some(Err(StorageError::from(err))),
                     }
-                    Err(err) => return Some(Err(StorageError::from(err))),
-                },
+                }
                 other => return other,
             }
         }

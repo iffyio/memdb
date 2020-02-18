@@ -14,16 +14,16 @@ pub enum Operation {
     Project(ProjectOperation),
 }
 
-pub struct Engine {
-    pub storage_manager: StorageManager,
+pub struct Engine<'storage> {
+    pub storage_manager: &'storage mut StorageManager,
 }
 
-impl Engine {
+impl<'storage> Engine<'storage> {
     pub fn execute_create_table(&mut self, op: CreateTableOperation) -> EmptyResult {
-        op.execute(&mut self.storage_manager)
+        op.execute(self.storage_manager)
     }
 
     pub fn execute_insert_tuple(&mut self, op: InsertTupleOperation) -> EmptyResult {
-        op.execute(&mut self.storage_manager)
+        op.execute(self.storage_manager)
     }
 }

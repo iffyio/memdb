@@ -2,7 +2,8 @@ use crate::execution::NextTuple;
 use crate::storage::error::{Result as StorageResult, StorageError};
 use crate::storage::storage_manager::{AttributeName, Schema};
 use crate::storage::tuple::TupleRecord;
-use crate::storage::tuple_serde::serialize_tuple;
+use crate::storage::tuple_serde::{serialize_tuple, StorageTupleValue};
+use std::collections::HashMap;
 
 pub struct ProjectOperation {
     pub record_schema: Schema,
@@ -14,7 +15,8 @@ impl NextTuple for ProjectOperation {
     fn next(&mut self) -> Option<Result<TupleRecord, StorageError>> {
         self.input.next().map(|result| {
             result.and_then(|record| {
-                let value_by_attr = record.to_values(self.record_schema.attributes_iter())?;
+                let value_by_attr =
+                    record.to_values::<_, HashMap<_, _>>(self.record_schema.attributes_iter())?;
                 let projected_values = self
                     .projected_attributes
                     .iter()

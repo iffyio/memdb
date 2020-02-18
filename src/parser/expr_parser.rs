@@ -77,7 +77,9 @@ impl Parser {
 
     pub fn l4_expr(input: &mut Input) -> Result<Expr> {
         match input.next() {
-            Some(Token::Identifier(id)) => Ok(Expr::Literal(LiteralExpr::String(id.to_owned()))),
+            Some(Token::Identifier(id)) => {
+                Ok(Expr::Literal(LiteralExpr::Identifier(id.to_owned())))
+            }
             Some(Token::Integer(num)) => Ok(Expr::Literal(LiteralExpr::Integer(*num))),
             Some(Token::True) => Ok(Expr::Literal(LiteralExpr::Boolean(true))),
             Some(Token::False) => Ok(Expr::Literal(LiteralExpr::Boolean(false))),

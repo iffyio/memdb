@@ -24,11 +24,11 @@ use error::Result;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-pub(crate) struct Translator {
-    storage_manager: StorageManager,
+pub(crate) struct Translator<'storage> {
+    pub storage_manager: &'storage StorageManager,
 }
 
-impl Translator {
+impl<'storage> Translator<'storage> {
     pub fn translate(&mut self, stmt: Stmt) -> Result<Plan> {
         match stmt {
             Stmt::CreateTable(stmt) => self.translate_create_table(stmt),
@@ -258,10 +258,10 @@ impl Translator {
         let child_plan = match from_clause {
             FromClause::Table(table_name) => {
                 let table_name = TableName(table_name);
-                let result_schema = self.get_table_schema(&table_name)?;
+                let schema = self.get_table_schema(&table_name)?;
                 QueryPlan {
-                    result_schema,
-                    plan: QueryPlanNode::Scan(ScanNode { table_name }),
+                    result_schema: schema.clone(),
+                    plan: QueryPlanNode::Scan(ScanNode { schema, table_name }),
                 }
             }
             FromClause::Select(nested_select) => {
@@ -312,10 +312,12 @@ impl Translator {
                     plan.result_schema.primary_key.clone(),
                     schema_attributes,
                 );
+                let record_schema = plan.result_schema.clone();
                 QueryPlan {
                     result_schema: result_schema.clone(),
                     plan: QueryPlanNode::Project(ProjectNode {
-                        record_schema: result_schema.clone(),
+                        schema: result_schema.clone(),
+                        record_schema,
                         attributes: attr_names
                             .into_iter()
                             .map(|attr| AttributeName(attr))
@@ -380,7 +382,7 @@ mod test {
         };
 
         let mut t = Translator {
-            storage_manager: StorageManager::new(StoreId(0)),
+            storage_manager: &StorageManager::new(),
         };
 
         let req = t.translate_create_table(stmt)?;
@@ -410,7 +412,7 @@ mod test {
             ],
         };
 
-        let mut storage_manager = StorageManager::new(StoreId(0));
+        let mut storage_manager = StorageManager::new();
         storage_manager.create_table(CreateTableRequest {
             table_name: TableName("person".to_owned()),
             primary_key: AttributeName("name".to_owned()),
@@ -419,7 +421,9 @@ mod test {
                 (AttributeName("age".to_owned()), AttributeType::Integer),
             ],
         })?;
-        let mut t = Translator { storage_manager };
+        let mut t = Translator {
+            storage_manager: &storage_manager,
+        };
 
         let plan = t.translate_insert(stmt)?;
         assert_eq!(
@@ -455,14 +459,16 @@ mod test {
             (AttributeName("age".to_owned()), AttributeType::Integer),
         ];
 
-        let mut storage_manager = StorageManager::new(StoreId(0));
+        let mut storage_manager = StorageManager::new();
         storage_manager.create_table(CreateTableRequest {
             table_name: TableName("person".to_owned()),
             primary_key: AttributeName("name".to_owned()),
             schema_attributes: schema_attributes.clone(),
         })?;
 
-        let mut t = Translator { storage_manager };
+        let mut t = Translator {
+            storage_manager: &storage_manager,
+        };
 
         let plan = t.translate_select(stmt)?;
 
@@ -481,6 +487,7 @@ mod test {
                     child: Box::new(QueryPlan {
                         result_schema: schema.clone(),
                         plan: QueryPlanNode::Scan(ScanNode {
+                            schema: schema.clone(),
                             table_name: TableName("person".to_owned())
                         })
                     })
@@ -521,14 +528,16 @@ mod test {
             ),
         ];
 
-        let mut storage_manager = StorageManager::new(StoreId(0));
+        let mut storage_manager = StorageManager::new();
         storage_manager.create_table(CreateTableRequest {
             table_name: TableName("person".to_owned()),
             primary_key: AttributeName("name".to_owned()),
             schema_attributes: schema_attributes.clone(),
         })?;
 
-        let mut t = Translator { storage_manager };
+        let mut t = Translator {
+            storage_manager: &storage_manager,
+        };
 
         let plan = t.translate_select(stmt)?;
 
@@ -553,7 +562,8 @@ mod test {
             Plan::Query(QueryPlan {
                 result_schema: result_schema.clone(),
                 plan: QueryPlanNode::Project(ProjectNode {
-                    record_schema: result_schema.clone(),
+                    schema: result_schema.clone(),
+                    record_schema: schema.clone(),
                     attributes: vec![
                         AttributeName("is_member".to_owned()),
                         AttributeName("age".to_owned())
@@ -566,6 +576,7 @@ mod test {
                             child: Box::new(QueryPlan {
                                 result_schema: schema.clone(),
                                 plan: QueryPlanNode::Scan(ScanNode {
+                                    schema: schema.clone(),
                                     table_name: TableName("person".to_owned())
                                 })
                             })

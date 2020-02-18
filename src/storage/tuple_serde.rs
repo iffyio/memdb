@@ -94,14 +94,12 @@ pub fn deserialize_tuple(tuple: TupleRecord, schema: Vec<AttributeType>) -> Vec<
 }
 
 impl TupleRecord {
-    pub fn to_values<'schema, T>(
-        &self,
-        schema: T,
-    ) -> Result<HashMap<AttributeName, StorageTupleValue>, SerdeError>
+    pub fn to_values<'schema, S, V>(&self, schema: S) -> Result<V, SerdeError>
     where
-        T: Iterator<Item = &'schema (AttributeName, AttributeType)>,
+        S: Iterator<Item = &'schema (AttributeName, AttributeType)>,
+        V: Default + Extend<(AttributeName, StorageTupleValue)>,
     {
-        let mut values = HashMap::new();
+        let mut values = V::default();
 
         let mut index = 0;
         for (attr_name, attr_type) in schema {
@@ -110,7 +108,7 @@ impl TupleRecord {
                 AttributeType::Text => Self::read_text(&self.0[index..])?,
                 AttributeType::Boolean => Self::read_boolean(&self.0[index..])?,
             };
-            values.insert(attr_name.clone(), value);
+            values.extend(vec![(attr_name.clone(), value)]);
             index += read_bytes;
         }
 

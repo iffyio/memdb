@@ -8,7 +8,9 @@ pub(crate) use crate::planner::optimizer::query_execution_plan::QueryExecutionPl
 pub(crate) use crate::planner::plan::create_plan::CreateTablePlan;
 pub(crate) use crate::planner::plan::insert_plan::InsertTuplePlan;
 pub(crate) use crate::planner::plan::query_plan::QueryPlan;
+use crate::planner::plan::query_plan::QueryPlanNode;
 pub(crate) use crate::planner::plan::Plan;
+use crate::storage::storage_manager::Schema;
 
 pub(crate) enum ExecutionPlan {
     CreateTable(create_table_execution_plan::CreateTableExecutionPlan),
@@ -16,10 +18,28 @@ pub(crate) enum ExecutionPlan {
     Query(query_execution_plan::QueryExecutionPlan),
 }
 
-struct Optimizer;
+impl ExecutionPlan {
+    pub fn result_schema(&self) -> Option<Schema> {
+        match self {
+            Self::Query(QueryExecutionPlan {
+                plan: QueryPlanNode::Scan(node),
+            }) => Some(node.schema.clone()),
+            Self::Query(QueryExecutionPlan {
+                plan: QueryPlanNode::Filter(node),
+            }) => Some(node.schema.clone()),
+            Self::Query(QueryExecutionPlan {
+                plan: QueryPlanNode::Project(node),
+            }) => Some(node.schema.clone()),
+            Self::CreateTable(plan) => None,
+            Self::InsertTuple(plan) => None,
+        }
+    }
+}
+
+pub(crate) struct Optimizer;
 
 impl Optimizer {
-    fn run(plan: Plan) -> ExecutionPlan {
+    pub fn run(plan: Plan) -> ExecutionPlan {
         match plan {
             Plan::CreateTable(CreateTablePlan {
                 table_name,

@@ -7,11 +7,25 @@ use crate::parser::expr_parser::Parser as ExprParser;
 use crate::parser::lexer::token::Token;
 use crate::parser::parse::{Input, ParseError, ParseHelper, Result};
 
-struct Parser;
+pub struct Parser;
 
 impl Parser {
     pub fn new() -> Self {
         Parser {}
+    }
+
+    pub fn parse(&mut self, mut input: Input) -> Result<Stmt> {
+        match input.peek() {
+            Some(&Token::Create) => Ok(Stmt::CreateTable(self.create_table_stmt(input)?)),
+            Some(&Token::Insert) => Ok(Stmt::Insert(self.insert_stmt(input)?)),
+            Some(&Token::Select) => Ok(Stmt::Select(self.select_stmt(input)?)),
+            Some(token) => Err(ParseError {
+                details: format!("invalid start of query {:?}", token),
+            }),
+            None => Err(ParseError {
+                details: "empty query".to_owned(),
+            }),
+        }
     }
 
     pub fn create_table_stmt(&mut self, mut input: Input) -> Result<CreateTableStmt> {

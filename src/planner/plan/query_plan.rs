@@ -3,6 +3,7 @@ use crate::storage::storage_manager::{AttributeName, Schema, StorageManager, Tab
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct ScanNode {
+    pub schema: Schema,
     pub table_name: TableName,
 }
 
@@ -15,6 +16,7 @@ pub(crate) struct FilterNode {
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct ProjectNode {
+    pub schema: Schema,
     pub record_schema: Schema,
     pub attributes: Vec<AttributeName>,
     pub child: Box<QueryPlan>,

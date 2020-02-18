@@ -68,9 +68,9 @@ pub struct StorageManager {
 }
 
 impl StorageManager {
-    pub fn new(initial_store_id: StoreId) -> Self {
+    pub fn new() -> Self {
         StorageManager {
-            next_store_id: initial_store_id,
+            next_store_id: StoreId(0),
             table_storage_directory: HashMap::new(),
             schemas: HashMap::new(),
         }

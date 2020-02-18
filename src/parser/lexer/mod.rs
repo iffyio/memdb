@@ -1,12 +1,13 @@
 use crate::parser::lexer::token::Token;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
 
 pub(crate) mod token;
 
 #[derive(Debug)]
 pub struct LexerError {
-    details: String,
+    pub details: String,
 }
 
 impl fmt::Display for LexerError {
@@ -15,9 +16,15 @@ impl fmt::Display for LexerError {
     }
 }
 
+impl Error for LexerError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
+
 type Result<T> = std::result::Result<T, LexerError>;
 
-struct Lexer {
+pub(crate) struct Lexer {
     keywords: HashMap<&'static str, Token>,
 }
 
@@ -138,6 +145,15 @@ impl Lexer {
             let length = digits.len();
             let integer = digits.parse().expect("string consists only of digits");
             return Ok((Token::Integer(integer), length));
+        }
+
+        if c == '\'' {
+            let mut chars = input.chars();
+            chars.next(); // Discard the leading "'"
+            let text = chars.take_while(|ch| ch != &'\'').collect::<String>();
+            let length = text.len() + 2;
+            let _ = Self::must('\'', input.chars().nth(length - 1))?;
+            return Ok((Token::StringLiteral(text), length));
         }
 
         return Err(LexerError {
@@ -275,6 +291,22 @@ mod test {
                 Token::Integer(2),
                 Token::Integer(34),
                 Token::Integer(5),
+                Token::EOF,
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn strings() -> Result<()> {
+        let l = Lexer::new();
+        let tokens = l.scan("id 'id' 'ab'")?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Identifier("id".to_owned()),
+                Token::StringLiteral("id".to_owned()),
+                Token::StringLiteral("ab".to_owned()),
                 Token::EOF,
             ]
         );
