@@ -18,7 +18,7 @@ impl Parser {
         match input.peek() {
             Some(&Token::Create) => Ok(Stmt::CreateTable(self.create_table_stmt(input)?)),
             Some(&Token::Insert) => Ok(Stmt::Insert(self.insert_stmt(input)?)),
-            Some(&Token::Select) => Ok(Stmt::Select(self.select_stmt(input)?)),
+            Some(&Token::Select) => Ok(Stmt::Select(self.select_stmt(input, true)?)),
             Some(token) => Err(ParseError {
                 details: format!("invalid start of query {:?}", token),
             }),
@@ -35,6 +35,7 @@ impl Parser {
         let _ = ParseHelper::match_token(Token::LeftParen, input.next())?;
         let attribute_definitions = self.attribute_definitions(&mut input)?;
         let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
+        let _ = ParseHelper::match_token(Token::Semicolon, input.next())?;
 
         Ok(CreateTableStmt {
             table_name,
@@ -92,6 +93,7 @@ impl Parser {
         let _ = ParseHelper::match_token(Token::LeftParen, input.next())?;
         let attribute_values = self.attribute_values(&mut input)?;
         let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
+        let _ = ParseHelper::match_token(Token::Semicolon, input.next())?;
 
         Ok(InsertStmt {
             table_name,
@@ -137,11 +139,15 @@ impl Parser {
         }
     }
 
-    pub fn select_stmt(&mut self, mut input: Input) -> Result<SelectStmt> {
+    pub fn select_stmt(&mut self, mut input: Input, is_stmt: bool) -> Result<SelectStmt> {
         let _ = ParseHelper::match_token(Token::Select, input.next())?;
         let properties = self.select_properties(&mut input)?;
         let from_clause = self.parse_from_clause(&mut input)?;
         let where_clause = self.where_clause(&mut input)?;
+
+        if (is_stmt) {
+            let _ = ParseHelper::match_token(Token::Semicolon, input.next())?;
+        }
 
         Ok(SelectStmt {
             properties,
@@ -224,6 +230,7 @@ mod test {
             Token::Identifier("age".to_owned()),
             Token::KeywordInteger,
             Token::RightParen,
+            Token::Semicolon,
             Token::EOF,
         ];
         let mut input = input.iter().peekable();
@@ -271,6 +278,7 @@ mod test {
             Token::Plus,
             Token::Integer(20),
             Token::RightParen,
+            Token::Semicolon,
             Token::EOF,
         ];
         let mut input = input.iter().peekable();
@@ -303,11 +311,12 @@ mod test {
             Token::Star,
             Token::From,
             Token::Identifier("person".to_string()),
+            Token::Semicolon,
             Token::EOF,
         ];
         let mut input = input.iter().peekable();
 
-        let select = p.select_stmt(&mut input)?;
+        let select = p.select_stmt(&mut input, true)?;
         assert_eq!(
             select,
             SelectStmt {
@@ -330,11 +339,12 @@ mod test {
             Token::Identifier("age".to_string()),
             Token::From,
             Token::Identifier("person".to_string()),
+            Token::Semicolon,
             Token::EOF,
         ];
         let mut input = input.iter().peekable();
 
-        let select = p.select_stmt(&mut input)?;
+        let select = p.select_stmt(&mut input, true)?;
         assert_eq!(
             select,
             SelectStmt {
@@ -362,11 +372,12 @@ mod test {
             Token::Identifier("person".to_string()),
             Token::Where,
             Token::True,
+            Token::Semicolon,
             Token::EOF,
         ];
         let mut input = input.iter().peekable();
 
-        let select = p.select_stmt(&mut input)?;
+        let select = p.select_stmt(&mut input, true)?;
         assert_eq!(
             select,
             SelectStmt {

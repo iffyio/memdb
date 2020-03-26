@@ -67,19 +67,19 @@ mod test {
     #[test]
     fn exec_query() {
         let mut db = DB::new();
-        db.execute("create table person (name varchar primary key, age integer)")
+        db.execute("create table person (name varchar primary key, age integer);")
             .unwrap();
-        db.execute("insert into person (name, age) values ('a', 1)")
+        db.execute("insert into person (name, age) values ('a', 1);")
             .unwrap();
-        db.execute("insert into person (name, age) values ('b', 2)")
+        db.execute("insert into person (name, age) values ('b', 2);")
             .unwrap();
-        db.execute("insert into person (name, age) values ('c', 3)")
+        db.execute("insert into person (name, age) values ('c', 3);")
             .unwrap();
-        db.execute("insert into person (name, age) values ('d', 4)")
+        db.execute("insert into person (name, age) values ('d', 4);")
             .unwrap();
         {
             let res = db
-                .execute("select age, name from person where age <= 2")
+                .execute("select age, name from person where age <= 2;")
                 .unwrap();
             assert_eq!(res.len(), 2);
 
@@ -99,7 +99,7 @@ mod test {
             ]));
         }
         {
-            let mut res = db.execute("select * from person where age = 4").unwrap();
+            let mut res = db.execute("select * from person where age = 4;").unwrap();
             assert_eq!(res.len(), 1);
 
             for record in &mut res {
