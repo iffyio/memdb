@@ -45,7 +45,7 @@ impl<'storage> Translator<'storage> {
 
         let table_name = TableName(table_name);
 
-        if let Some(_) = self.storage_manager.get_schema(&table_name) {
+        if let Some(_) = self.storage_manager.get_schema(&table_name, None) {
             return Err(TranslateError::StorageError(Box::new(
                 StorageError::AlreadyExists(format!("table {:?}", table_name.0)),
             )));
@@ -104,7 +104,7 @@ impl<'storage> Translator<'storage> {
         } = stmt;
 
         let table_name = TableName(table_name);
-        let schema = self.get_table_schema(&table_name)?;
+        let schema = self.get_table_schema(&table_name, None)?;
 
         if attribute_names.len() != attribute_values.len() {
             return Err(TranslateError::InvalidArguments(format!(
@@ -253,12 +253,13 @@ impl<'storage> Translator<'storage> {
             properties,
             from_clause,
             where_clause,
+            alias,
         } = stmt;
 
         let child_plan = match from_clause {
             FromClause::Table(table_name) => {
                 let table_name = TableName(table_name);
-                let schema = self.get_table_schema(&table_name)?;
+                let schema = self.get_table_schema(&table_name, alias.as_ref())?;
                 QueryPlan {
                     result_schema: schema.clone(),
                     plan: QueryPlanNode::Scan(ScanNode { schema, table_name }),
@@ -332,8 +333,8 @@ impl<'storage> Translator<'storage> {
         Ok(Plan::Query(plan))
     }
 
-    fn get_table_schema(&self, table_name: &TableName) -> Result<Schema> {
-        match self.storage_manager.get_schema(table_name) {
+    fn get_table_schema(&self, table_name: &TableName, alias: Option<&String>) -> Result<Schema> {
+        match self.storage_manager.get_schema(table_name, alias) {
             Some(schema) => Ok(schema),
             None => Err(TranslateError::NoSuchTable(table_name.0.clone())),
         }
@@ -360,8 +361,10 @@ mod test {
     };
     use crate::storage::tuple::{StoreId, TupleRecord};
     use crate::storage::types::{AttributeType as StorageAttributeType, AttributeType};
+    use crate::translate::error::TranslateError;
     use crate::translate::Translator;
     use std::collections::HashMap;
+    use std::error::Error;
 
     #[test]
     fn translate_create_table() -> Result<()> {
@@ -452,6 +455,7 @@ mod test {
             properties: SelectProperties::Star,
             from_clause: FromClause::Table("person".to_owned()),
             where_clause: WhereClause::Expr(predicate.clone()),
+            alias: None,
         };
 
         let schema_attributes = vec![
@@ -516,6 +520,7 @@ mod test {
             ]),
             from_clause: FromClause::Table("person".to_owned()),
             where_clause: WhereClause::Expr(predicate.clone()),
+            alias: None,
         };
 
         let schema_attributes = vec![
@@ -585,6 +590,124 @@ mod test {
                 })
             })
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn translate_projection_with_alias() -> Result<()> {
+        let stmt = SelectStmt {
+            properties: SelectProperties::Identifiers(vec![
+                "employee.is_member".to_owned(),
+                "employee.age".to_owned(),
+            ]),
+            from_clause: FromClause::Table("person".to_owned()),
+            where_clause: WhereClause::None,
+            alias: Some("employee".to_owned()),
+        };
+
+        let schema_attributes = vec![
+            (AttributeName("name".to_owned()), AttributeType::Text),
+            (AttributeName("age".to_owned()), AttributeType::Integer),
+            (AttributeName("location".to_owned()), AttributeType::Text),
+            (
+                AttributeName("is_member".to_owned()),
+                AttributeType::Boolean,
+            ),
+        ];
+
+        let mut storage_manager = StorageManager::new();
+        storage_manager.create_table(CreateTableRequest {
+            table_name: TableName("person".to_owned()),
+            primary_key: AttributeName("name".to_owned()),
+            schema_attributes: schema_attributes.clone(),
+        })?;
+
+        let mut t = Translator {
+            storage_manager: &storage_manager,
+        };
+
+        let plan = t.translate_select(stmt)?;
+
+        let schema = Schema::new(
+            StoreId(0),
+            AttributeName("name".to_owned()),
+            schema_attributes.clone(),
+        );
+        let result_schema = Schema::new(
+            StoreId(0),
+            AttributeName("employee.name".to_owned()),
+            vec![
+                (
+                    AttributeName("employee.is_member".to_owned()),
+                    AttributeType::Boolean,
+                ),
+                (
+                    AttributeName("employee.age".to_owned()),
+                    AttributeType::Integer,
+                ),
+            ],
+        );
+        assert_eq!(
+            plan,
+            Plan::Query(QueryPlan {
+                result_schema: result_schema.clone(),
+                plan: QueryPlanNode::Project(ProjectNode {
+                    schema: result_schema.clone(),
+                    record_schema: schema.clone().with_alias("employee"),
+                    attributes: vec![
+                        AttributeName("employee.is_member".to_owned()),
+                        AttributeName("employee.age".to_owned())
+                    ],
+                    child: Box::new(QueryPlan {
+                        result_schema: schema.clone().with_alias("employee"),
+                        plan: QueryPlanNode::Scan(ScanNode {
+                            schema: schema.clone().with_alias("employee"),
+                            table_name: TableName("person".to_owned())
+                        })
+                    })
+                })
+            })
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn translate_projection_with_wrong_alias() -> Result<()> {
+        let stmt = SelectStmt {
+            properties: SelectProperties::Identifiers(vec![
+                "is_member".to_owned(),
+                "age".to_owned(),
+            ]),
+            from_clause: FromClause::Table("person".to_owned()),
+            where_clause: WhereClause::None,
+            alias: Some("employee".to_owned()),
+        };
+
+        let schema_attributes = vec![
+            (AttributeName("name".to_owned()), AttributeType::Text),
+            (AttributeName("age".to_owned()), AttributeType::Integer),
+            (AttributeName("location".to_owned()), AttributeType::Text),
+            (
+                AttributeName("is_member".to_owned()),
+                AttributeType::Boolean,
+            ),
+        ];
+
+        let mut storage_manager = StorageManager::new();
+        storage_manager.create_table(CreateTableRequest {
+            table_name: TableName("person".to_owned()),
+            primary_key: AttributeName("name".to_owned()),
+            schema_attributes: schema_attributes.clone(),
+        })?;
+
+        let mut t = Translator {
+            storage_manager: &storage_manager,
+        };
+
+        let plan = t.translate_select(stmt);
+        assert_matches!(plan, Err(TranslateError::NoSuchAttribute(_)));
 
         Ok(())
     }

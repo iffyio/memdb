@@ -59,6 +59,22 @@ impl Schema {
             .map(|(attr_name, attr_type)| (&attr_name.0, attr_type))
             .collect()
     }
+
+    pub fn with_alias(self, alias: &str) -> Schema {
+        Schema::new(
+            self.store_id,
+            AttributeName(format!("{}.{}", alias, self.primary_key.0)),
+            self.attributes
+                .into_iter()
+                .map(|(attr_name, attr_type)| {
+                    (
+                        AttributeName(format!("{}.{}", alias, attr_name.0)),
+                        attr_type,
+                    )
+                })
+                .collect(),
+        )
+    }
 }
 
 pub struct StorageManager {
@@ -115,8 +131,14 @@ impl StorageManager {
             .map(|v| v.borrow_mut())
     }
 
-    pub fn get_schema(&self, table_name: &TableName) -> Option<Schema> {
-        self.schemas.get(table_name).map(|schema| schema.clone())
+    pub fn get_schema(&self, table_name: &TableName, alias: Option<&String>) -> Option<Schema> {
+        self.schemas
+            .get(table_name)
+            .map(|schema| schema.clone())
+            .map(|schema| match alias {
+                Some(alias) => schema.with_alias(alias),
+                None => schema,
+            })
     }
 
     fn create_new_store_id(&mut self) -> StoreId {

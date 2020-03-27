@@ -26,6 +26,7 @@ type Result<T> = std::result::Result<T, LexerError>;
 
 pub(crate) struct Lexer {
     keywords: HashMap<&'static str, Token>,
+    double_word_keywords: HashMap<(&'static str, &'static str), Token>,
 }
 
 impl Lexer {
@@ -40,13 +41,23 @@ impl Lexer {
             keywords.insert("where", Token::Where);
             keywords.insert("integer", Token::KeywordInteger);
             keywords.insert("varchar", Token::KeywordVarchar);
-            keywords.insert("primary key", Token::KeywordPrimaryKey);
             keywords.insert("into", Token::KeywordInto);
             keywords.insert("values", Token::KeywordValues);
+            keywords.insert("as", Token::KeywordAs);
+            keywords.insert("on", Token::KeywordOn);
+            keywords.insert("inner join", Token::KeywordOn);
             keywords.insert("true", Token::True);
             keywords.insert("false", Token::False);
         }
-        Lexer { keywords }
+        let mut double_word_keywords = HashMap::new();
+        {
+            double_word_keywords.insert(("primary", "key"), Token::KeywordPrimaryKey);
+            double_word_keywords.insert(("inner", "join"), Token::KeywordInnerJoin);
+        }
+        Lexer {
+            keywords,
+            double_word_keywords,
+        }
     }
 
     pub fn scan(&self, input: &str) -> Result<Vec<Token>> {
@@ -115,22 +126,47 @@ impl Lexer {
             let identifier =
                 Lexer::scan_identifier(&input).expect("id already has at least length 1");
 
+            let suffix = if let Some('.') = input[identifier.len()..].chars().peekable().peek() {
+                match Lexer::scan_identifier(&input[identifier.len() + 1..]) {
+                    Some(suffix) => format!(".{}", suffix),
+                    None => {
+                        return Err(LexerError {
+                            details: format!("no suffix provided for identifier {:?}.", identifier),
+                        })
+                    }
+                }
+            } else {
+                "".to_owned()
+            };
+
+            let identifier = format!("{}{}", identifier, suffix);
+
             let length = identifier.len();
 
-            if identifier.to_lowercase().as_str() == "primary" {
-                // Is this 'PRIMARY KEY'?
-                let whitespace_count = Lexer::scan_whitespace(&input[length..]);
+            // Match the suffix of a 2-part keyword e.g the ' JOIN' of an 'INNER JOIN'
+            fn match_whitespace_and_keyword(input: &str, keyword: &str) -> Option<usize> {
+                let whitespace_count = Lexer::scan_whitespace(input);
                 if whitespace_count > 0
-                    && Lexer::scan_identifier(&input[length + whitespace_count..])
+                    && Lexer::scan_identifier(&input[whitespace_count..])
                         .map(|id| id.to_lowercase())
-                        == Some("key".to_string())
+                        == Some(keyword.to_string())
                 {
-                    return Ok((
-                        Token::KeywordPrimaryKey,
-                        length + whitespace_count + "key".len(),
-                    ));
+                    return Some(whitespace_count + keyword.len());
+                }
+                None
+            }
+
+            // Is this a 2-part keyword e.g 'INNER JOIN'
+            for ((prefix, suffix), keyword) in &self.double_word_keywords {
+                if &identifier.to_lowercase().as_str() != prefix {
+                    continue;
+                }
+                match match_whitespace_and_keyword(&input[length..], suffix) {
+                    Some(matched_length) => return Ok((keyword.clone(), length + matched_length)),
+                    None => (),
                 }
             }
+
             return match self.keywords.get(identifier.to_ascii_lowercase().as_str()) {
                 Some(token) => Ok((token.clone(), length)),
                 None => Ok((Token::Identifier(identifier), length)),
@@ -238,7 +274,7 @@ mod test {
     #[test]
     fn identifiers() -> Result<()> {
         let l = Lexer::new();
-        let tokens = l.scan("cat bat a rat")?;
+        let tokens = l.scan("cat bat a rat foo.bar qux")?;
         assert_eq!(
             tokens,
             vec![
@@ -246,16 +282,20 @@ mod test {
                 Token::Identifier("bat".to_owned()),
                 Token::Identifier("a".to_owned()),
                 Token::Identifier("rat".to_owned()),
+                Token::Identifier("foo.bar".to_owned()),
+                Token::Identifier("qux".to_owned()),
                 Token::EOF,
             ]
         );
+
+        assert!(l.scan("cat bat foo. bar").is_err());
         Ok(())
     }
 
     #[test]
     fn keywords() -> Result<()> {
         let l = Lexer::new();
-        let tokens = l.scan("create insert INSERT table CREATE select from where integer varchar primary KEy into values true false")?;
+        let tokens = l.scan("create insert INSERT table CREATE select from where integer varchar primary KEy into values as inner join on true false")?;
         assert_eq!(
             tokens,
             vec![
@@ -272,6 +312,9 @@ mod test {
                 Token::KeywordPrimaryKey,
                 Token::KeywordInto,
                 Token::KeywordValues,
+                Token::KeywordAs,
+                Token::KeywordInnerJoin,
+                Token::KeywordOn,
                 Token::True,
                 Token::False,
                 Token::EOF,

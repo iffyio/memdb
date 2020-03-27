@@ -46,6 +46,34 @@ pub struct SelectStmt {
     pub properties: SelectProperties,
     pub from_clause: FromClause,
     pub where_clause: WhereClause,
+    pub alias: Option<String>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum _SelectStmt {
+    Select(SingleSelectStmt),
+    Join(JoinStmt),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct SingleSelectStmt {
+    pub properties: SelectProperties,
+    pub from_clause: FromClause,
+    pub where_clause: WhereClause,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct JoinStmt {
+    pub properties: SelectProperties,
+    pub left: FromClause,
+    pub right: FromClause,
+    pub condition: WhereClause,
+    pub join_type: JoinType,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum JoinType {
+    InnerJoin,
 }
 
 #[derive(Debug, Eq, PartialEq)]

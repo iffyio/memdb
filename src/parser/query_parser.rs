@@ -143,9 +143,17 @@ impl Parser {
         let _ = ParseHelper::match_token(Token::Select, input.next())?;
         let properties = self.select_properties(&mut input)?;
         let from_clause = self.parse_from_clause(&mut input)?;
+        let alias = match input.peek() {
+            Some(&Token::KeywordAs) => {
+                let _as = input.next();
+                let alias = ParseHelper::match_identifier(input.next())?;
+                Some(alias)
+            }
+            _ => None,
+        };
         let where_clause = self.where_clause(&mut input)?;
 
-        if (is_stmt) {
+        if is_stmt {
             let _ = ParseHelper::match_token(Token::Semicolon, input.next())?;
         }
 
@@ -153,6 +161,7 @@ impl Parser {
             properties,
             from_clause,
             where_clause,
+            alias,
         })
     }
 
@@ -188,7 +197,12 @@ impl Parser {
     fn parse_from_clause(&self, input: &mut Input) -> Result<FromClause> {
         let _ = ParseHelper::match_token(Token::From, input.next())?;
 
-        match input.next() {
+        let has_parenthesis = input.peek() == Some(&&Token::LeftParen);
+        if has_parenthesis {
+            let _left_paren = input.next();
+        }
+
+        let res = match input.next() {
             Some(Token::Identifier(id)) => Ok(FromClause::Table(id.to_owned())),
             Some(unexpected) => Err(ParseError::token_mismatch(
                 Token::Identifier("<table>".to_owned()),
@@ -197,7 +211,13 @@ impl Parser {
             None => Err(ParseError::unexpected_eof(Token::Identifier(
                 "<table>".to_owned(),
             ))),
+        };
+
+        if res.is_ok() && has_parenthesis {
+            let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
         }
+
+        res
     }
 
     fn where_clause(&self, mut input: &mut Input) -> Result<WhereClause> {
@@ -323,6 +343,7 @@ mod test {
                 properties: SelectProperties::Star,
                 from_clause: FromClause::Table("person".to_string()),
                 where_clause: WhereClause::None,
+                alias: None,
             }
         );
 
@@ -331,33 +352,54 @@ mod test {
 
     #[test]
     fn parse_select_attributes_from() -> Result<()> {
-        let mut p = Parser::new();
-        let mut input = [
-            Token::Select,
-            Token::Identifier("name".to_string()),
-            Token::Comma,
-            Token::Identifier("age".to_string()),
-            Token::From,
-            Token::Identifier("person".to_string()),
-            Token::Semicolon,
-            Token::EOF,
-        ];
-        let mut input = input.iter().peekable();
+        fn run_test(with_parenthesis: bool) -> Result<()> {
+            let mut p = Parser::new();
+            let mut input = [
+                vec![
+                    Token::Select,
+                    Token::Identifier("name".to_string()),
+                    Token::Comma,
+                    Token::Identifier("age".to_string()),
+                    Token::From,
+                    Token::Identifier("person".to_string()),
+                    Token::Semicolon,
+                    Token::EOF,
+                ],
+                if with_parenthesis {
+                    vec![Token::LeftParen]
+                } else {
+                    vec![]
+                },
+                vec![Token::Identifier("person".to_string())],
+                if with_parenthesis {
+                    vec![Token::RightParen]
+                } else {
+                    vec![]
+                },
+                vec![Token::Semicolon, Token::EOF],
+            ]
+            .concat();
+            let mut input = input.iter().peekable();
 
-        let select = p.select_stmt(&mut input, true)?;
-        assert_eq!(
-            select,
-            SelectStmt {
-                properties: SelectProperties::Identifiers(vec![
-                    "name".to_owned(),
-                    "age".to_owned()
-                ]),
-                from_clause: FromClause::Table("person".to_string()),
-                where_clause: WhereClause::None,
-            }
-        );
+            let select = p.select_stmt(&mut input, true)?;
+            assert_eq!(
+                select,
+                SelectStmt {
+                    properties: SelectProperties::Identifiers(vec![
+                        "name".to_owned(),
+                        "age".to_owned()
+                    ]),
+                    from_clause: FromClause::Table("person".to_string()),
+                    where_clause: WhereClause::None,
+                    alias: None,
+                }
+            );
 
-        Ok(())
+            Ok(())
+        }
+
+        run_test(true)?;
+        run_test(false)
     }
 
     #[test]
@@ -387,6 +429,74 @@ mod test {
                 ]),
                 from_clause: FromClause::Table("person".to_string()),
                 where_clause: WhereClause::Expr(Expr::Literal(LiteralExpr::Boolean(true))),
+                alias: None,
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_select_star_from_as() -> Result<()> {
+        let mut p = Parser::new();
+        let mut input = [
+            Token::Select,
+            Token::Star,
+            Token::From,
+            Token::Identifier("person".to_string()),
+            Token::KeywordAs,
+            Token::Identifier("employee".to_string()),
+            Token::Semicolon,
+            Token::EOF,
+        ];
+        let mut input = input.iter().peekable();
+
+        let select = p.select_stmt(&mut input, true)?;
+        assert_eq!(
+            select,
+            SelectStmt {
+                properties: SelectProperties::Star,
+                from_clause: FromClause::Table("person".to_string()),
+                alias: Some("employee".to_string()),
+                where_clause: WhereClause::None,
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn parse_inner_join() -> Result<()> {
+        let mut p = Parser::new();
+        let mut input = [
+            Token::Select,
+            Token::Identifier("person.age".to_string()),
+            Token::Comma,
+            Token::Identifier("employee.id".to_string()),
+            Token::From,
+            Token::Identifier("person".to_string()),
+            Token::Where,
+            Token::True,
+            Token::KeywordInnerJoin,
+            Token::Identifier("employee".to_string()),
+            Token::Where,
+            Token::False,
+            Token::KeywordOn,
+            Token::True,
+            Token::Semicolon,
+            Token::EOF,
+        ];
+        let mut input = input.iter().peekable();
+
+        let select = p.select_stmt(&mut input, true)?;
+        assert_eq!(
+            select,
+            SelectStmt {
+                properties: SelectProperties::Star,
+                from_clause: FromClause::Table("person".to_string()),
+                where_clause: WhereClause::None,
+                alias: None,
             }
         );
 
