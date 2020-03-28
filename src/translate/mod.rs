@@ -4,7 +4,7 @@ mod type_check;
 use crate::parser::ast::{
     AttributeDefinition, AttributeType as ParserAttributeType, AttributeType, AttributeValue,
     BinaryExpr, BinaryOperation, CreateTableStmt, Expr, FromClause, InsertStmt, LiteralExpr,
-    SelectProperties, SelectStmt, Stmt, WhereClause,
+    SelectProperties, SelectStmt, SingleSelectStmt, Stmt, WhereClause,
 };
 use crate::planner::plan::create_plan::CreateTablePlan;
 use crate::planner::plan::insert_plan::InsertTuplePlan;
@@ -249,7 +249,14 @@ impl<'storage> Translator<'storage> {
     }
 
     fn translate_select(&mut self, stmt: SelectStmt) -> Result<Plan> {
-        let SelectStmt {
+        match stmt {
+            SelectStmt::Select(stmt) => self.translate_single_select(stmt),
+            SelectStmt::Join(stmt) => unimplemented!(),
+        }
+    }
+
+    fn translate_single_select(&mut self, stmt: SingleSelectStmt) -> Result<Plan> {
+        let SingleSelectStmt {
             properties,
             from_clause,
             where_clause,
@@ -348,7 +355,7 @@ mod test {
     use crate::parser::ast::{
         AttributeDefinition, AttributeType as ParserAttributeType, AttributeValue, BinaryExpr,
         BinaryOperation, CreateTableStmt, FromClause, InsertStmt, LiteralExpr, SelectProperties,
-        SelectStmt, WhereClause,
+        SelectStmt, SingleSelectStmt, WhereClause,
     };
     use crate::planner::plan::create_plan::CreateTablePlan;
     use crate::planner::plan::insert_plan::InsertTuplePlan;
@@ -451,12 +458,12 @@ mod test {
                 right: Box::new(Expr::Literal(LiteralExpr::Integer(2))),
             })),
         });
-        let stmt = SelectStmt {
+        let stmt = SelectStmt::Select(SingleSelectStmt {
             properties: SelectProperties::Star,
             from_clause: FromClause::Table("person".to_owned()),
             where_clause: WhereClause::Expr(predicate.clone()),
             alias: None,
-        };
+        });
 
         let schema_attributes = vec![
             (AttributeName("name".to_owned()), AttributeType::Text),
@@ -513,7 +520,7 @@ mod test {
                 right: Box::new(Expr::Literal(LiteralExpr::Integer(2))),
             })),
         });
-        let stmt = SelectStmt {
+        let stmt = SelectStmt::Select(SingleSelectStmt {
             properties: SelectProperties::Identifiers(vec![
                 "is_member".to_owned(),
                 "age".to_owned(),
@@ -521,7 +528,7 @@ mod test {
             from_clause: FromClause::Table("person".to_owned()),
             where_clause: WhereClause::Expr(predicate.clone()),
             alias: None,
-        };
+        });
 
         let schema_attributes = vec![
             (AttributeName("name".to_owned()), AttributeType::Text),
@@ -596,7 +603,7 @@ mod test {
 
     #[test]
     fn translate_projection_with_alias() -> Result<()> {
-        let stmt = SelectStmt {
+        let stmt = SelectStmt::Select(SingleSelectStmt {
             properties: SelectProperties::Identifiers(vec![
                 "employee.is_member".to_owned(),
                 "employee.age".to_owned(),
@@ -604,7 +611,7 @@ mod test {
             from_clause: FromClause::Table("person".to_owned()),
             where_clause: WhereClause::None,
             alias: Some("employee".to_owned()),
-        };
+        });
 
         let schema_attributes = vec![
             (AttributeName("name".to_owned()), AttributeType::Text),
@@ -675,7 +682,7 @@ mod test {
 
     #[test]
     fn translate_projection_with_wrong_alias() -> Result<()> {
-        let stmt = SelectStmt {
+        let stmt = SelectStmt::Select(SingleSelectStmt {
             properties: SelectProperties::Identifiers(vec![
                 "is_member".to_owned(),
                 "age".to_owned(),
@@ -683,7 +690,7 @@ mod test {
             from_clause: FromClause::Table("person".to_owned()),
             where_clause: WhereClause::None,
             alias: Some("employee".to_owned()),
-        };
+        });
 
         let schema_attributes = vec![
             (AttributeName("name".to_owned()), AttributeType::Text),

@@ -1,9 +1,10 @@
 use crate::parser::ast::*;
 use crate::parser::lexer::token::Token;
 use crate::parser::parse::ParseHelper;
-use crate::parser::parse::{Input, ParseError, Result};
+use crate::parser::parse::{Input, ParseError};
 
 pub struct Parser {}
+type Result<T> = std::result::Result<T, ParseError>;
 
 impl Parser {
     pub fn expr(input: &mut Input) -> Result<Expr> {
@@ -80,7 +81,7 @@ impl Parser {
             Some(Token::Identifier(id)) => {
                 Ok(Expr::Literal(LiteralExpr::Identifier(id.to_owned())))
             }
-            Some(Token::Integer(num)) => Ok(Expr::Literal(LiteralExpr::Integer(*num))),
+            Some(Token::Integer(num)) => Ok(Expr::Literal(LiteralExpr::Integer(num))),
             Some(Token::True) => Ok(Expr::Literal(LiteralExpr::Boolean(true))),
             Some(Token::False) => Ok(Expr::Literal(LiteralExpr::Boolean(false))),
             Some(Token::LeftParen) => {
@@ -106,10 +107,9 @@ mod test {
 
     #[test]
     fn parse_simple_addition() -> Result<()> {
-        let mut input = [Token::Integer(1), Token::Plus, Token::Integer(2)];
-        let mut input = input.iter().peekable();
+        let mut input = Input::new(vec![Token::Integer(1), Token::Plus, Token::Integer(2)]);
 
-        let e = Parser::expr(&mut &mut input)?;
+        let e = Parser::expr(&mut input)?;
         assert_eq!(
             e,
             Expr::Binary(BinaryExpr {
@@ -124,10 +124,9 @@ mod test {
 
     #[test]
     fn parse_simple_multiplication() -> Result<()> {
-        let mut input = [Token::Integer(1), Token::Slash, Token::Integer(2)];
-        let mut input = input.iter().peekable();
+        let mut input = Input::new(vec![Token::Integer(1), Token::Slash, Token::Integer(2)]);
 
-        let e = Parser::expr(&mut &mut input)?;
+        let e = Parser::expr(&mut input)?;
         assert_eq!(
             e,
             Expr::Binary(BinaryExpr {
@@ -142,16 +141,15 @@ mod test {
 
     #[test]
     fn parse_precedence_arithmetic() -> Result<()> {
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::Integer(1),
             Token::Plus,
             Token::Integer(2),
             Token::Star,
             Token::Integer(3),
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let e = Parser::expr(&mut &mut input)?;
+        let e = Parser::expr(&mut input)?;
         assert_eq!(
             e,
             Expr::Binary(BinaryExpr {
@@ -170,16 +168,15 @@ mod test {
 
     #[test]
     fn parse_arithmetic_left_associativity() -> Result<()> {
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::Integer(1),
             Token::Plus,
             Token::Integer(2),
             Token::Plus,
             Token::Integer(3),
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let e = Parser::expr(&mut &mut input)?;
+        let e = Parser::expr(&mut input)?;
         assert_eq!(
             e,
             Expr::Binary(BinaryExpr {
@@ -198,16 +195,15 @@ mod test {
 
     #[test]
     fn parse_equality_left_associativity() -> Result<()> {
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::Integer(1),
             Token::LessThan,
             Token::Integer(2),
             Token::GreaterThanOrEqual,
             Token::Integer(3),
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let e = Parser::expr(&mut &mut input)?;
+        let e = Parser::expr(&mut input)?;
         assert_eq!(
             e,
             Expr::Binary(BinaryExpr {
@@ -226,7 +222,7 @@ mod test {
 
     #[test]
     fn parse_parenthesis() -> Result<()> {
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::LeftParen,
             Token::Integer(1),
             Token::Plus,
@@ -234,10 +230,9 @@ mod test {
             Token::RightParen,
             Token::Star,
             Token::Integer(3),
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let e = Parser::expr(&mut &mut input)?;
+        let e = Parser::expr(&mut input)?;
         assert_eq!(
             e,
             Expr::Binary(BinaryExpr {

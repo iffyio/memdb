@@ -1,7 +1,7 @@
 use crate::evaluate::Evaluation;
 use crate::execution::Engine;
-use crate::parser::Lexer;
 use crate::parser::Parser;
+use crate::parser::{Input, Lexer};
 use crate::planner::optimizer::Optimizer;
 use crate::storage::storage_manager::{AttributeName, StorageManager};
 use crate::storage::tuple::TupleRecord;
@@ -27,7 +27,7 @@ impl DB {
         let lexer = Lexer::new();
         let mut parser = Parser::new();
         let mut tokens = lexer.scan(query)?;
-        let stmt = parser.parse(&mut tokens.iter().peekable())?;
+        let stmt = parser.parse(Input::new(tokens))?;
 
         let plan = {
             let mut translator = Translator {

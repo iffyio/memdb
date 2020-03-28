@@ -5,7 +5,8 @@ use crate::parser::ast::*;
 use crate::parser::expr_parser;
 use crate::parser::expr_parser::Parser as ExprParser;
 use crate::parser::lexer::token::Token;
-use crate::parser::parse::{Input, ParseError, ParseHelper, Result};
+use crate::parser::lexer::token::Token::Where;
+use crate::parser::parse::{Input, ParseError, ParseHelper, Result, TokenStream};
 
 pub struct Parser;
 
@@ -14,11 +15,11 @@ impl Parser {
         Parser {}
     }
 
-    pub fn parse(&mut self, mut input: Input) -> Result<Stmt> {
+    pub fn parse(&mut self, input: Input) -> std::result::Result<Stmt, ParseError> {
         match input.peek() {
-            Some(&Token::Create) => Ok(Stmt::CreateTable(self.create_table_stmt(input)?)),
-            Some(&Token::Insert) => Ok(Stmt::Insert(self.insert_stmt(input)?)),
-            Some(&Token::Select) => Ok(Stmt::Select(self.select_stmt(input, true)?)),
+            Some(&Token::Create) => Ok(Stmt::CreateTable(self.create_table_stmt(input)?.0)),
+            Some(&Token::Insert) => Ok(Stmt::Insert(self.insert_stmt(input)?.0)),
+            Some(&Token::Select) => Ok(Stmt::Select(self.select_stmt(input, true)?.0)),
             Some(token) => Err(ParseError {
                 details: format!("invalid start of query {:?}", token),
             }),
@@ -33,17 +34,20 @@ impl Parser {
         let _ = ParseHelper::match_token(Token::Table, input.next())?;
         let table_name = ParseHelper::match_identifier(input.next())?;
         let _ = ParseHelper::match_token(Token::LeftParen, input.next())?;
-        let attribute_definitions = self.attribute_definitions(&mut input)?;
+        let (attribute_definitions, mut input) = self.attribute_definitions(input)?;
         let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
         let _ = ParseHelper::match_token(Token::Semicolon, input.next())?;
 
-        Ok(CreateTableStmt {
-            table_name,
-            attribute_definitions,
-        })
+        Ok((
+            CreateTableStmt {
+                table_name,
+                attribute_definitions,
+            },
+            input,
+        ))
     }
 
-    pub fn attribute_definitions(&mut self, input: &mut Input) -> Result<Vec<AttributeDefinition>> {
+    pub fn attribute_definitions(&mut self, mut input: Input) -> Result<Vec<AttributeDefinition>> {
         let mut definitions = Vec::new();
 
         loop {
@@ -77,7 +81,7 @@ impl Parser {
                 Some(&Token::Comma) => {
                     let _comma = input.next();
                 }
-                _ => return Ok(definitions),
+                _ => return Ok((definitions, input)),
             }
         }
     }
@@ -87,22 +91,25 @@ impl Parser {
         let _ = ParseHelper::match_token(Token::KeywordInto, input.next())?;
         let table_name = ParseHelper::match_identifier(input.next())?;
         let _ = ParseHelper::match_token(Token::LeftParen, input.next())?;
-        let attribute_names = self.identifiers(&mut input)?;
+        let (attribute_names, mut input) = self.identifiers(input)?;
         let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
         let _ = ParseHelper::match_token(Token::KeywordValues, input.next())?;
         let _ = ParseHelper::match_token(Token::LeftParen, input.next())?;
-        let attribute_values = self.attribute_values(&mut input)?;
+        let (attribute_values, mut input) = self.attribute_values(input)?;
         let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
         let _ = ParseHelper::match_token(Token::Semicolon, input.next())?;
 
-        Ok(InsertStmt {
-            table_name,
-            attribute_names,
-            attribute_values,
-        })
+        Ok((
+            InsertStmt {
+                table_name,
+                attribute_names,
+                attribute_values,
+            },
+            input,
+        ))
     }
 
-    pub fn identifiers(&mut self, input: &mut Input) -> Result<Vec<String>> {
+    pub fn identifiers(&mut self, mut input: Input) -> Result<Vec<String>> {
         let mut identifiers = Vec::new();
 
         loop {
@@ -112,21 +119,22 @@ impl Parser {
                 Some(&Token::Comma) => {
                     let _comma = input.next();
                 }
-                _ => return Ok(identifiers),
+                _ => return Ok((identifiers, input)),
             }
         }
     }
 
-    pub fn attribute_values(&mut self, input: &mut Input) -> Result<Vec<AttributeValue>> {
+    pub fn attribute_values(&mut self, mut input: Input) -> Result<Vec<AttributeValue>> {
         let mut values = Vec::new();
 
         loop {
             let v = match input.peek() {
-                Some(&Token::StringLiteral(str)) => {
+                Some(Token::StringLiteral(str)) => {
+                    let result = AttributeValue::String(str.to_owned());
                     let _string = input.next();
-                    AttributeValue::String(str.to_owned())
+                    result
                 }
-                _ => AttributeValue::Expr(ExprParser::expr(input)?),
+                _ => AttributeValue::Expr(ExprParser::expr(&mut input)?),
             };
             values.push(v);
 
@@ -134,40 +142,84 @@ impl Parser {
                 Some(&Token::Comma) => {
                     let _comma = input.next();
                 }
-                _ => return Ok(values),
+                _ => return Ok((values, input)),
             }
         }
     }
 
     pub fn select_stmt(&mut self, mut input: Input, is_stmt: bool) -> Result<SelectStmt> {
         let _ = ParseHelper::match_token(Token::Select, input.next())?;
-        let properties = self.select_properties(&mut input)?;
-        let from_clause = self.parse_from_clause(&mut input)?;
-        let alias = match input.peek() {
-            Some(&Token::KeywordAs) => {
-                let _as = input.next();
-                let alias = ParseHelper::match_identifier(input.next())?;
-                Some(alias)
+        let (properties, mut input) = self.select_properties(input)?;
+
+        let _ = ParseHelper::match_token(Token::From, input.next())?;
+        let ((from_clause, alias), mut input) = self.parse_from_clause(input)?;
+
+        fn from_clause_to_join_query(
+            from_clause: FromClause,
+            alias: Option<String>,
+        ) -> SingleSelectStmt {
+            SingleSelectStmt {
+                properties: SelectProperties::Star,
+                from_clause,
+                where_clause: WhereClause::None,
+                alias,
             }
-            _ => None,
+        }
+
+        let (rh_join, where_clause, mut input) = match input.peek() {
+            Some(Token::KeywordInnerJoin) => {
+                let _ = ParseHelper::match_token(Token::KeywordInnerJoin, input.next())?;
+                let ((from_clause, alias), input) = self.parse_from_clause(input)?;
+
+                // Wrap right hand side of join inside a select statement.
+                (
+                    Some(from_clause_to_join_query(from_clause, alias)),
+                    None,
+                    input,
+                )
+            }
+            _ => {
+                let (where_clause, input) = self.where_clause(input)?;
+                (None, Some(where_clause), input)
+            }
         };
-        let where_clause = self.where_clause(&mut input)?;
+
+        let (stmt, mut input) = match rh_join {
+            Some(rh_join) => {
+                let (where_clause, input) = self.join_predicate(input)?;
+                (
+                    SelectStmt::Join(JoinStmt {
+                        join_type: JoinType::InnerJoin,
+                        properties,
+                        // Wrap left hand side of join inside a select statement.
+                        left: from_clause_to_join_query(from_clause, alias),
+                        right: rh_join,
+                        predicate: where_clause,
+                    }),
+                    input,
+                )
+            }
+            None => (
+                SelectStmt::Select(SingleSelectStmt {
+                    properties,
+                    from_clause,
+                    where_clause: where_clause.expect("we either have a join or where clause set."),
+                    alias,
+                }),
+                input,
+            ),
+        };
 
         if is_stmt {
             let _ = ParseHelper::match_token(Token::Semicolon, input.next())?;
         }
 
-        Ok(SelectStmt {
-            properties,
-            from_clause,
-            where_clause,
-            alias,
-        })
+        Ok((stmt, input))
     }
 
-    fn select_properties(&self, input: &mut Input) -> Result<SelectProperties> {
+    fn select_properties(&self, mut input: Input) -> Result<SelectProperties> {
         match input.next() {
-            Some(Token::Star) => Ok(SelectProperties::Star),
+            Some(Token::Star) => Ok((SelectProperties::Star, input)),
             Some(Token::Identifier(id)) => {
                 let mut ids = vec![id.clone()];
                 while let Some(&Token::Comma) = input.peek() {
@@ -187,23 +239,28 @@ impl Parser {
                         }
                     }
                 }
-                Ok(SelectProperties::Identifiers(ids))
+                Ok((SelectProperties::Identifiers(ids), input))
             }
             Some(got) => Err(ParseError::token_mismatch(Token::Star, got.clone())),
             None => Err(ParseError::unexpected_eof(Token::Star)),
         }
     }
 
-    fn parse_from_clause(&self, input: &mut Input) -> Result<FromClause> {
-        let _ = ParseHelper::match_token(Token::From, input.next())?;
-
+    fn parse_from_clause(&mut self, mut input: Input) -> Result<(FromClause, Option<String>)> {
         let has_parenthesis = input.peek() == Some(&&Token::LeftParen);
         if has_parenthesis {
             let _left_paren = input.next();
         }
 
-        let res = match input.next() {
-            Some(Token::Identifier(id)) => Ok(FromClause::Table(id.to_owned())),
+        let res = match input.peek() {
+            Some(Token::Identifier(_)) => Ok((
+                FromClause::Table(ParseHelper::match_identifier(input.next())?),
+                input,
+            )),
+            Some(Token::Select) => {
+                let (select_stmt, mut input) = self.select_stmt(input, false)?;
+                Ok((FromClause::Select(Box::new(select_stmt)), input))
+            }
             Some(unexpected) => Err(ParseError::token_mismatch(
                 Token::Identifier("<table>".to_owned()),
                 unexpected.clone(),
@@ -213,20 +270,41 @@ impl Parser {
             ))),
         };
 
-        if res.is_ok() && has_parenthesis {
-            let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
-        }
-
-        res
+        res.and_then(|(from_clause, mut input)| {
+            if has_parenthesis {
+                let _ = ParseHelper::match_token(Token::RightParen, input.next())?;
+            }
+            let (alias, input) = self.match_alias(input)?;
+            Ok(((from_clause, alias), input))
+        })
     }
 
-    fn where_clause(&self, mut input: &mut Input) -> Result<WhereClause> {
+    fn where_clause(&self, mut input: Input) -> Result<WhereClause> {
+        self.where_clause_with_prefix(Token::Where, input)
+    }
+
+    fn join_predicate(&self, mut input: Input) -> Result<WhereClause> {
+        self.where_clause_with_prefix(Token::KeywordOn, input)
+    }
+
+    fn where_clause_with_prefix(&self, prefix: Token, mut input: Input) -> Result<WhereClause> {
         match input.peek() {
-            Some(&Token::Where) => {
-                let _where = input.next();
-                Ok(WhereClause::Expr(ExprParser::expr(input)?))
+            Some(token) if token == &prefix => {
+                let _prefix = input.next();
+                Ok((WhereClause::Expr(ExprParser::expr(&mut input)?), input))
             }
-            _ => Ok(WhereClause::None),
+            _ => Ok((WhereClause::None, input)),
+        }
+    }
+
+    fn match_alias(&self, mut input: Input) -> Result<Option<String>> {
+        match input.peek() {
+            Some(&Token::KeywordAs) => {
+                let _as = input.next();
+                let alias = ParseHelper::match_identifier(input.next())?;
+                Ok((Some(alias), input))
+            }
+            _ => Ok((None, input)),
         }
     }
 }
@@ -234,11 +312,12 @@ impl Parser {
 #[cfg(test)]
 mod test {
     use super::*;
+    type Result<T> = std::result::Result<T, ParseError>;
 
     #[test]
     fn create_table() -> Result<()> {
         let mut p = Parser::new();
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::Create,
             Token::Table,
             Token::Identifier("person".to_owned()),
@@ -252,10 +331,9 @@ mod test {
             Token::RightParen,
             Token::Semicolon,
             Token::EOF,
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let create = p.create_table_stmt(&mut input)?;
+        let (create, _) = p.create_table_stmt(input)?;
         assert_eq!(
             create,
             CreateTableStmt {
@@ -281,7 +359,7 @@ mod test {
     #[test]
     fn insert() -> Result<()> {
         let mut p = Parser::new();
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::Insert,
             Token::KeywordInto,
             Token::Identifier("person".to_owned()),
@@ -300,10 +378,9 @@ mod test {
             Token::RightParen,
             Token::Semicolon,
             Token::EOF,
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let insert = p.insert_stmt(&mut input)?;
+        let (insert, _) = p.insert_stmt(input)?;
         assert_eq!(
             insert,
             InsertStmt {
@@ -326,25 +403,24 @@ mod test {
     #[test]
     fn parse_select_star_from() -> Result<()> {
         let mut p = Parser::new();
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::Select,
             Token::Star,
             Token::From,
             Token::Identifier("person".to_string()),
             Token::Semicolon,
             Token::EOF,
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let select = p.select_stmt(&mut input, true)?;
+        let (select, _) = p.select_stmt(input, true)?;
         assert_eq!(
             select,
-            SelectStmt {
+            SelectStmt::Select(SingleSelectStmt {
                 properties: SelectProperties::Star,
                 from_clause: FromClause::Table("person".to_string()),
                 where_clause: WhereClause::None,
                 alias: None,
-            }
+            })
         );
 
         Ok(())
@@ -354,37 +430,38 @@ mod test {
     fn parse_select_attributes_from() -> Result<()> {
         fn run_test(with_parenthesis: bool) -> Result<()> {
             let mut p = Parser::new();
-            let mut input = [
-                vec![
-                    Token::Select,
-                    Token::Identifier("name".to_string()),
-                    Token::Comma,
-                    Token::Identifier("age".to_string()),
-                    Token::From,
-                    Token::Identifier("person".to_string()),
-                    Token::Semicolon,
-                    Token::EOF,
-                ],
-                if with_parenthesis {
-                    vec![Token::LeftParen]
-                } else {
-                    vec![]
-                },
-                vec![Token::Identifier("person".to_string())],
-                if with_parenthesis {
-                    vec![Token::RightParen]
-                } else {
-                    vec![]
-                },
-                vec![Token::Semicolon, Token::EOF],
-            ]
-            .concat();
-            let mut input = input.iter().peekable();
+            let mut input = Input::new(
+                [
+                    vec![
+                        Token::Select,
+                        Token::Identifier("name".to_string()),
+                        Token::Comma,
+                        Token::Identifier("age".to_string()),
+                        Token::From,
+                        Token::Identifier("person".to_string()),
+                        Token::Semicolon,
+                        Token::EOF,
+                    ],
+                    if with_parenthesis {
+                        vec![Token::LeftParen]
+                    } else {
+                        vec![]
+                    },
+                    vec![Token::Identifier("person".to_string())],
+                    if with_parenthesis {
+                        vec![Token::RightParen]
+                    } else {
+                        vec![]
+                    },
+                    vec![Token::Semicolon, Token::EOF],
+                ]
+                .concat(),
+            );
 
-            let select = p.select_stmt(&mut input, true)?;
+            let (select, _) = p.select_stmt(input, true)?;
             assert_eq!(
                 select,
-                SelectStmt {
+                SelectStmt::Select(SingleSelectStmt {
                     properties: SelectProperties::Identifiers(vec![
                         "name".to_owned(),
                         "age".to_owned()
@@ -392,7 +469,7 @@ mod test {
                     from_clause: FromClause::Table("person".to_string()),
                     where_clause: WhereClause::None,
                     alias: None,
-                }
+                })
             );
 
             Ok(())
@@ -405,7 +482,7 @@ mod test {
     #[test]
     fn parse_select_attributes_from_where() -> Result<()> {
         let mut p = Parser::new();
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::Select,
             Token::Identifier("name".to_string()),
             Token::Comma,
@@ -416,13 +493,12 @@ mod test {
             Token::True,
             Token::Semicolon,
             Token::EOF,
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let select = p.select_stmt(&mut input, true)?;
+        let (select, _) = p.select_stmt(input, true)?;
         assert_eq!(
             select,
-            SelectStmt {
+            SelectStmt::Select(SingleSelectStmt {
                 properties: SelectProperties::Identifiers(vec![
                     "name".to_owned(),
                     "age".to_owned()
@@ -430,7 +506,7 @@ mod test {
                 from_clause: FromClause::Table("person".to_string()),
                 where_clause: WhereClause::Expr(Expr::Literal(LiteralExpr::Boolean(true))),
                 alias: None,
-            }
+            })
         );
 
         Ok(())
@@ -439,7 +515,7 @@ mod test {
     #[test]
     fn parse_select_star_from_as() -> Result<()> {
         let mut p = Parser::new();
-        let mut input = [
+        let mut input = Input::new(vec![
             Token::Select,
             Token::Star,
             Token::From,
@@ -448,56 +524,85 @@ mod test {
             Token::Identifier("employee".to_string()),
             Token::Semicolon,
             Token::EOF,
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let select = p.select_stmt(&mut input, true)?;
+        let (select, _) = p.select_stmt(input, true)?;
         assert_eq!(
             select,
-            SelectStmt {
+            SelectStmt::Select(SingleSelectStmt {
                 properties: SelectProperties::Star,
                 from_clause: FromClause::Table("person".to_string()),
                 alias: Some("employee".to_string()),
                 where_clause: WhereClause::None,
-            }
+            })
         );
 
         Ok(())
     }
 
     #[test]
-    #[ignore]
     fn parse_inner_join() -> Result<()> {
         let mut p = Parser::new();
-        let mut input = [
+        // select person.age, employee.id from foo as person
+        //  inner join (select * from bar where false) as employee on true;
+        let mut input = Input::new(vec![
             Token::Select,
             Token::Identifier("person.age".to_string()),
             Token::Comma,
             Token::Identifier("employee.id".to_string()),
             Token::From,
+            Token::Identifier("foo".to_string()),
+            Token::KeywordAs,
             Token::Identifier("person".to_string()),
-            Token::Where,
-            Token::True,
             Token::KeywordInnerJoin,
-            Token::Identifier("employee".to_string()),
+            Token::LeftParen,
+            Token::Select,
+            Token::Star,
+            Token::From,
+            Token::Identifier("bar".to_string()),
             Token::Where,
             Token::False,
+            Token::RightParen,
+            Token::KeywordAs,
+            Token::Identifier("employee".to_string()),
             Token::KeywordOn,
             Token::True,
             Token::Semicolon,
             Token::EOF,
-        ];
-        let mut input = input.iter().peekable();
+        ]);
 
-        let select = p.select_stmt(&mut input, true)?;
+        let (select, _) = p.select_stmt(input, true)?;
         assert_eq!(
             select,
-            SelectStmt {
-                properties: SelectProperties::Star,
-                from_clause: FromClause::Table("person".to_string()),
-                where_clause: WhereClause::None,
-                alias: None,
-            }
+            SelectStmt::Join(JoinStmt {
+                join_type: JoinType::InnerJoin,
+                properties: SelectProperties::Identifiers(vec![
+                    "person.age".to_owned(),
+                    "employee.id".to_owned()
+                ]),
+                left: SingleSelectStmt {
+                    properties: SelectProperties::Star,
+                    from_clause: FromClause::Table("foo".to_owned()),
+                    where_clause: WhereClause::None,
+                    alias: Some("person".to_owned())
+                },
+                right: SingleSelectStmt {
+                    properties: SelectProperties::Star,
+                    from_clause: FromClause::Select(Box::new(SelectStmt::Select(
+                        SingleSelectStmt {
+                            properties: SelectProperties::Star,
+                            from_clause: FromClause::Table("bar".to_owned()),
+                            where_clause: WhereClause::Expr(Expr::Literal(LiteralExpr::Boolean(
+                                false
+                            ))),
+                            alias: None
+                        }
+                    ))),
+                    where_clause: WhereClause::None,
+                    alias: Some("employee".to_owned())
+                },
+                predicate: WhereClause::Expr(Expr::Literal(LiteralExpr::Boolean(true)))
+            })
         );
 
         Ok(())
