@@ -1,5 +1,6 @@
 use crate::execution::{NextTuple, TupleResult};
 use crate::parser::ast::{BinaryOperation, Expr, LiteralExpr};
+use crate::planner::plan::query_plan::QueryResultSchema;
 use crate::storage::error::{Result as StorageResult, StorageError};
 use crate::storage::storage_manager::{AttributeName, Schema, StorageManager};
 use crate::storage::tuple::TupleRecord;
@@ -8,7 +9,7 @@ use std::collections::HashMap;
 
 pub struct FilterOperation {
     pub predicate: Expr,
-    pub schema: Schema,
+    pub schema: QueryResultSchema,
     pub input: Box<dyn NextTuple>,
 }
 
@@ -17,7 +18,9 @@ impl NextTuple for FilterOperation {
         loop {
             match self.input.next() {
                 Some(Ok(record)) => {
-                    match record.to_values::<_, HashMap<_, _>>(self.schema.attributes_iter()) {
+                    match record
+                        .to_values::<_, HashMap<_, _>>(self.schema.attributes.attributes_iter())
+                    {
                         Ok(tuple_values) => {
                             let forward = FilterOperation::evaluate_predicate_with_ctx(
                                 &self.predicate,
@@ -41,7 +44,7 @@ impl NextTuple for FilterOperation {
 }
 
 impl FilterOperation {
-    pub fn new(predicate: Expr, schema: Schema, input: Box<dyn NextTuple>) -> Self {
+    pub fn new(predicate: Expr, schema: QueryResultSchema, input: Box<dyn NextTuple>) -> Self {
         FilterOperation {
             predicate,
             schema,
@@ -142,6 +145,7 @@ mod test {
     use crate::execution::{NextTuple, ScanOperation};
     use crate::parser::ast::Expr::{self, Binary};
     use crate::parser::ast::{BinaryExpr, BinaryOperation, LiteralExpr};
+    use crate::planner::plan::query_plan::QueryResultSchema;
     use crate::storage::storage_manager::{AttributeName, Schema};
     use crate::storage::tuple::StoreId;
     use crate::storage::tuple_serde::{deserialize_tuple, serialize_tuple, StorageTupleValue};
@@ -149,14 +153,10 @@ mod test {
 
     #[test]
     fn filter() {
-        let schema = Schema::new(
-            StoreId(0),
-            AttributeName("name".to_owned()),
-            vec![
-                (AttributeName("name".to_owned()), AttributeType::Text),
-                (AttributeName("age".to_owned()), AttributeType::Integer),
-            ],
-        );
+        let schema = QueryResultSchema::new(vec![
+            (AttributeName("name".to_owned()), AttributeType::Text),
+            (AttributeName("age".to_owned()), AttributeType::Integer),
+        ]);
 
         let mut input = ScanOperation::new(vec![
             serialize_tuple(vec![
@@ -197,6 +197,7 @@ mod test {
                     tuple,
                     schema
                         .clone()
+                        .attributes
                         .attributes_iter()
                         .map(|(_, _type)| _type.clone())
                         .collect()

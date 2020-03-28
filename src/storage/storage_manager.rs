@@ -20,10 +20,50 @@ pub struct TableName(pub String);
 pub struct AttributeName(pub String);
 
 #[derive(Debug, Eq, PartialEq, Clone)]
+pub struct Attributes(Vec<(AttributeName, AttributeType)>);
+
+impl Attributes {
+    pub fn new(attributes: Vec<(AttributeName, AttributeType)>) -> Self {
+        Attributes(attributes)
+    }
+
+    pub fn with_alias(self, alias: &str) -> Self {
+        Attributes(
+            self.0
+                .into_iter()
+                .map(|(attr_name, attr_type)| {
+                    (
+                        AttributeName(format!("{}.{}", alias, attr_name.0)),
+                        attr_type,
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub fn get_attribute_type(&self, name: &AttributeName) -> Option<AttributeType> {
+        self.0
+            .iter()
+            .find(|(_name, _)| _name == name)
+            .map(|(_, _type)| _type.clone())
+    }
+
+    pub fn attributes_iter(&self) -> impl Iterator<Item = &(AttributeName, AttributeType)> {
+        self.0.iter()
+    }
+
+    pub fn as_lookup_table(&self) -> HashMap<&String, &AttributeType> {
+        self.attributes_iter()
+            .map(|(attr_name, attr_type)| (&attr_name.0, attr_type))
+            .collect()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Schema {
     pub store_id: StoreId,
     pub primary_key: AttributeName,
-    attributes: Vec<(AttributeName, AttributeType)>,
+    pub attributes: Attributes,
 }
 
 impl Schema {
@@ -35,44 +75,19 @@ impl Schema {
         Schema {
             store_id,
             primary_key,
-            attributes,
+            attributes: Attributes(attributes),
         }
     }
 
     pub fn num_attributes(&self) -> usize {
-        self.attributes.len()
-    }
-
-    pub fn get_attribute_type(&self, name: &AttributeName) -> Option<AttributeType> {
-        self.attributes
-            .iter()
-            .find(|(_name, _)| _name == name)
-            .map(|(_, _type)| _type.clone())
-    }
-
-    pub fn attributes_iter(&self) -> impl Iterator<Item = &(AttributeName, AttributeType)> {
-        self.attributes.iter()
-    }
-
-    pub fn as_lookup_table(&self) -> HashMap<&String, &AttributeType> {
-        self.attributes_iter()
-            .map(|(attr_name, attr_type)| (&attr_name.0, attr_type))
-            .collect()
+        self.attributes.0.len()
     }
 
     pub fn with_alias(self, alias: &str) -> Schema {
         Schema::new(
             self.store_id,
             AttributeName(format!("{}.{}", alias, self.primary_key.0)),
-            self.attributes
-                .into_iter()
-                .map(|(attr_name, attr_type)| {
-                    (
-                        AttributeName(format!("{}.{}", alias, attr_name.0)),
-                        attr_type,
-                    )
-                })
-                .collect(),
+            self.attributes.with_alias(alias).0,
         )
     }
 }

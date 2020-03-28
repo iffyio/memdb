@@ -8,7 +8,7 @@ pub(crate) use crate::planner::optimizer::query_execution_plan::QueryExecutionPl
 pub(crate) use crate::planner::plan::create_plan::CreateTablePlan;
 pub(crate) use crate::planner::plan::insert_plan::InsertTuplePlan;
 pub(crate) use crate::planner::plan::query_plan::QueryPlan;
-use crate::planner::plan::query_plan::QueryPlanNode;
+use crate::planner::plan::query_plan::{QueryPlanNode, QueryResultSchema};
 pub(crate) use crate::planner::plan::Plan;
 use crate::storage::storage_manager::Schema;
 
@@ -19,7 +19,7 @@ pub(crate) enum ExecutionPlan {
 }
 
 impl ExecutionPlan {
-    pub fn result_schema(&self) -> Option<Schema> {
+    pub fn result_schema(&self) -> Option<QueryResultSchema> {
         match self {
             Self::Query(QueryExecutionPlan {
                 plan: QueryPlanNode::Scan(node),
@@ -32,6 +32,7 @@ impl ExecutionPlan {
             }) => Some(node.schema.clone()),
             Self::CreateTable(plan) => None,
             Self::InsertTuple(plan) => None,
+            _ => unimplemented!(),
         }
     }
 }

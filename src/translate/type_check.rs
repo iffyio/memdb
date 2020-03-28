@@ -1,10 +1,13 @@
-use crate::parser::ast::{BinaryOperation, Expr, LiteralExpr};
-use crate::storage::storage_manager::AttributeName;
+use crate::parser::ast::{BinaryOperation, Expr, LiteralExpr, WhereClause};
+use crate::storage::storage_manager::{AttributeName, Attributes};
 use crate::storage::types::AttributeType;
 use crate::translate::error::{Result, TranslateError};
 use std::collections::HashMap;
 
-pub fn type_check_expr(expr: &Expr, ctx: &HashMap<&String, &AttributeType>) -> Result<()> {
+pub fn type_check_expr(
+    expr: &Expr,
+    ctx: &HashMap<&String, &AttributeType>,
+) -> Result<AttributeType> {
     fn eval(attr: &String, ctx: &HashMap<&String, &AttributeType>) -> Result<AttributeType> {
         ctx.get(attr).map(|t| (*t).clone()).ok_or_else(|| {
             TranslateError::InvalidArguments(format!("no such attribute {:?}", attr))
@@ -59,6 +62,43 @@ pub fn type_check_expr(expr: &Expr, ctx: &HashMap<&String, &AttributeType>) -> R
         }
     }
 
-    let _ = type_check(expr, ctx)?;
-    Ok(())
+    type_check(expr, ctx)
+}
+
+pub fn type_check_projection(
+    attr_names: &Vec<String>,
+    ctx: &HashMap<&String, &AttributeType>,
+) -> Result<Attributes> {
+    let mut attributes = Vec::new();
+    for attr_name in attr_names {
+        match ctx.get(attr_name) {
+            Some(attr_type) => {
+                attributes.push((AttributeName(attr_name.clone()), (*attr_type).clone()))
+            }
+            None => return Err(TranslateError::NoSuchAttribute(attr_name.clone())),
+        }
+    }
+    Ok(Attributes::new(attributes))
+}
+
+// TODO make return type a boolean expression.
+pub fn type_check_join_predicate(
+    predicate: WhereClause,
+    ctx: &HashMap<&String, &AttributeType>,
+) -> Result<Expr> {
+    match predicate {
+        WhereClause::None => Err(TranslateError::InvalidArguments(
+            "no join condition provided".to_owned(),
+        )),
+        WhereClause::Expr(expr) => {
+            type_check_expr(&expr, ctx).and_then(|expr_type| match expr_type {
+                AttributeType::Boolean => Ok(expr),
+                invalid => Err(TranslateError::TypeError(format!(
+                    "invalid type {:?} join condition must be type {:?}",
+                    invalid,
+                    AttributeType::Boolean
+                ))),
+            })
+        }
+    }
 }

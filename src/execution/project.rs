@@ -1,4 +1,5 @@
 use crate::execution::NextTuple;
+use crate::planner::plan::query_plan::QueryResultSchema;
 use crate::storage::error::{Result as StorageResult, StorageError};
 use crate::storage::storage_manager::{AttributeName, Schema};
 use crate::storage::tuple::TupleRecord;
@@ -6,7 +7,7 @@ use crate::storage::tuple_serde::{serialize_tuple, StorageTupleValue};
 use std::collections::HashMap;
 
 pub struct ProjectOperation {
-    pub record_schema: Schema,
+    pub record_schema: QueryResultSchema,
     pub projected_attributes: Vec<AttributeName>,
     pub input: Box<dyn NextTuple>,
 }
@@ -15,8 +16,9 @@ impl NextTuple for ProjectOperation {
     fn next(&mut self) -> Option<Result<TupleRecord, StorageError>> {
         self.input.next().map(|result| {
             result.and_then(|record| {
-                let value_by_attr =
-                    record.to_values::<_, HashMap<_, _>>(self.record_schema.attributes_iter())?;
+                let value_by_attr = record.to_values::<_, HashMap<_, _>>(
+                    self.record_schema.attributes.attributes_iter(),
+                )?;
                 let projected_values = self
                     .projected_attributes
                     .iter()
@@ -40,6 +42,7 @@ mod test {
     use crate::execution::{NextTuple, ProjectOperation, ScanOperation};
     use crate::parser::ast::Expr::{self, Binary};
     use crate::parser::ast::{BinaryExpr, BinaryOperation, LiteralExpr};
+    use crate::planner::plan::query_plan::QueryResultSchema;
     use crate::storage::storage_manager::{AttributeName, Schema};
     use crate::storage::tuple::StoreId;
     use crate::storage::tuple_serde::{deserialize_tuple, serialize_tuple, StorageTupleValue};
@@ -47,30 +50,22 @@ mod test {
 
     #[test]
     fn project() {
-        let schema = Schema::new(
-            StoreId(0),
-            AttributeName("name".to_owned()),
-            vec![
-                (AttributeName("name".to_owned()), AttributeType::Text),
-                (AttributeName("age".to_owned()), AttributeType::Integer),
-                (AttributeName("location".to_owned()), AttributeType::Text),
-                (
-                    AttributeName("is_member".to_owned()),
-                    AttributeType::Boolean,
-                ),
-            ],
-        );
-        let projection_schema = Schema::new(
-            StoreId(0),
-            AttributeName("name".to_owned()),
-            vec![
-                (
-                    AttributeName("is_member".to_owned()),
-                    AttributeType::Boolean,
-                ),
-                (AttributeName("age".to_owned()), AttributeType::Integer),
-            ],
-        );
+        let schema = QueryResultSchema::new(vec![
+            (AttributeName("name".to_owned()), AttributeType::Text),
+            (AttributeName("age".to_owned()), AttributeType::Integer),
+            (AttributeName("location".to_owned()), AttributeType::Text),
+            (
+                AttributeName("is_member".to_owned()),
+                AttributeType::Boolean,
+            ),
+        ]);
+        let projection_schema = QueryResultSchema::new(vec![
+            (
+                AttributeName("is_member".to_owned()),
+                AttributeType::Boolean,
+            ),
+            (AttributeName("age".to_owned()), AttributeType::Integer),
+        ]);
         let mut input = ScanOperation::new(vec![
             serialize_tuple(vec![
                 StorageTupleValue::String("a".to_owned()),
@@ -117,6 +112,7 @@ mod test {
                     tuple,
                     projection_schema
                         .clone()
+                        .attributes
                         .attributes_iter()
                         .map(|(_, _type)| _type.clone())
                         .collect()

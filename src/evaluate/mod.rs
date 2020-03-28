@@ -8,7 +8,9 @@ use crate::planner::optimizer::{
     CreateTableExecutionPlan, InsertTupleExecutionPlan, QueryExecutionPlan,
 };
 use crate::planner::plan::query_plan::QueryPlanNode::Project;
-use crate::planner::plan::query_plan::{FilterNode, ProjectNode, QueryPlanNode, ScanNode};
+use crate::planner::plan::query_plan::{
+    FilterNode, ProjectNode, QueryPlanNode, QueryResultSchema, ScanNode,
+};
 use crate::planner::ExecutionPlan;
 use crate::storage::error::{Result as StorageResult, StorageError};
 use crate::storage::storage_manager::{AttributeName, Schema, StorageManager};
@@ -22,7 +24,7 @@ pub(crate) struct Evaluation<'storage> {
 }
 
 pub(crate) struct EvaluationResult {
-    schema: Option<Schema>,
+    schema: Option<QueryResultSchema>,
     input: Box<dyn NextTuple>,
 }
 
@@ -30,7 +32,7 @@ impl EvaluationResult {
     pub fn next(&mut self) -> Option<StorageResult<Vec<(AttributeName, StorageTupleValue)>>> {
         self.input.next().map(|tuple| {
             tuple.and_then(|tuple| {
-                Ok(tuple.to_values(self.schema.as_ref().unwrap().attributes_iter())?)
+                Ok(tuple.to_values(self.schema.as_ref().unwrap().attributes.attributes_iter())?)
             })
         })
     }
@@ -100,6 +102,7 @@ impl<'storage> Evaluation<'storage> {
                 schema,
                 input: Box::new(self.evaluate_project(node)),
             },
+            _ => unimplemented!(),
         }
     }
 
@@ -132,6 +135,7 @@ impl<'storage> Evaluation<'storage> {
             QueryPlanNode::Project(node) => {
                 FilterOperation::new(predicate, schema, Box::new(self.evaluate_project(node)))
             }
+            QueryPlanNode::Join(node) => unimplemented!(),
         }
     }
 
@@ -159,6 +163,7 @@ impl<'storage> Evaluation<'storage> {
                 projected_attributes: attributes,
                 input: Box::new(self.evaluate_project(node)),
             },
+            QueryPlanNode::Join(node) => unimplemented!(),
         }
     }
 }
