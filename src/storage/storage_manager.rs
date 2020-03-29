@@ -16,7 +16,7 @@ pub struct CreateTableRequest {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TableName(pub String);
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct AttributeName(pub String);
 
 #[derive(Debug, Eq, PartialEq, Clone)]

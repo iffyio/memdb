@@ -1,15 +1,16 @@
 mod db;
 
 use crate::execution::{
-    CreateTableOperation, EmptyResult, Engine, FilterOperation, InsertTupleOperation, NextTuple,
-    Operation, ProjectOperation, ScanOperation, TupleResult,
+    CreateTableOperation, EmptyResult, Engine, FilterOperation, InnerJoinOperation,
+    InsertTupleOperation, NextTuple, Operation, ProjectOperation, ScanOperation, SubQueryTuples,
+    TupleResult,
 };
 use crate::planner::optimizer::{
     CreateTableExecutionPlan, InsertTupleExecutionPlan, QueryExecutionPlan,
 };
 use crate::planner::plan::query_plan::QueryPlanNode::Project;
 use crate::planner::plan::query_plan::{
-    FilterNode, ProjectNode, QueryPlanNode, QueryResultSchema, ScanNode,
+    FilterNode, JoinNode, ProjectNode, QueryPlan, QueryPlanNode, QueryResultSchema, ScanNode,
 };
 use crate::planner::ExecutionPlan;
 use crate::storage::error::{Result as StorageResult, StorageError};
@@ -84,25 +85,14 @@ impl<'storage> Evaluation<'storage> {
                         .execute_insert_tuple(InsertTupleOperation { table_name, tuple }),
                 )
             }
-            ExecutionPlan::Query(QueryExecutionPlan {
-                plan: QueryPlanNode::Scan(node),
-            }) => EvaluationResult {
-                schema,
-                input: Box::new(self.evaluate_scan(node)),
-            },
-            ExecutionPlan::Query(QueryExecutionPlan {
-                plan: QueryPlanNode::Filter(node),
-            }) => EvaluationResult {
-                schema,
-                input: Box::new(self.evaluate_filter(node)),
-            },
-            ExecutionPlan::Query(QueryExecutionPlan {
-                plan: QueryPlanNode::Project(node),
-            }) => EvaluationResult {
-                schema,
-                input: Box::new(self.evaluate_project(node)),
-            },
-            _ => unimplemented!(),
+            ExecutionPlan::Query(QueryExecutionPlan { plan }) => {
+                let schema = schema.expect("a query must have a schema.");
+                let sub_query = self.create_query_plan(schema, plan);
+                EvaluationResult {
+                    schema: Some(sub_query.schema),
+                    input: sub_query.tuples,
+                }
+            }
         }
     }
 
@@ -118,52 +108,58 @@ impl<'storage> Evaluation<'storage> {
         ScanOperation::new(tuples)
     }
 
-    fn evaluate_filter(&self, node: FilterNode) -> FilterOperation {
+    fn evaluate_filter(&mut self, node: FilterNode) -> FilterOperation {
         let FilterNode {
             predicate,
             schema,
             child,
         } = node;
-
-        match child.plan {
-            QueryPlanNode::Scan(node) => {
-                FilterOperation::new(predicate, schema, Box::new(self.evaluate_scan(node)))
-            }
-            QueryPlanNode::Filter(node) => {
-                FilterOperation::new(predicate, schema, Box::new(self.evaluate_filter(node)))
-            }
-            QueryPlanNode::Project(node) => {
-                FilterOperation::new(predicate, schema, Box::new(self.evaluate_project(node)))
-            }
-            QueryPlanNode::Join(node) => unimplemented!(),
-        }
+        let sub_query = self.create_query_plan(child.result_schema, child.plan);
+        FilterOperation::new(predicate, schema, sub_query.tuples)
     }
 
-    fn evaluate_project(&self, node: ProjectNode) -> ProjectOperation {
+    fn evaluate_project(&mut self, node: ProjectNode) -> ProjectOperation {
         let ProjectNode {
             record_schema,
             attributes,
             child,
-            ..
+            schema: _,
+        } = node;
+        let sub_query = self.create_query_plan(child.result_schema, child.plan);
+        ProjectOperation {
+            record_schema,
+            projected_attributes: attributes,
+            input: sub_query.tuples,
+        }
+    }
+
+    fn evaluate_join(&mut self, node: JoinNode) -> InnerJoinOperation {
+        let JoinNode {
+            join_type: _,
+            predicate,
+            schema,
+            left,
+            right,
         } = node;
 
-        match child.plan {
-            QueryPlanNode::Scan(node) => ProjectOperation {
-                record_schema,
-                projected_attributes: attributes,
-                input: Box::new(self.evaluate_scan(node)),
-            },
-            QueryPlanNode::Filter(node) => ProjectOperation {
-                record_schema,
-                projected_attributes: attributes,
-                input: Box::new(self.evaluate_filter(node)),
-            },
-            QueryPlanNode::Project(node) => ProjectOperation {
-                record_schema,
-                projected_attributes: attributes,
-                input: Box::new(self.evaluate_project(node)),
-            },
-            QueryPlanNode::Join(node) => unimplemented!(),
-        }
+        let left = self.create_query_plan(left.result_schema, left.plan);
+        let right = self.create_query_plan(right.result_schema, right.plan);
+
+        InnerJoinOperation::new(left, right, predicate)
+    }
+
+    fn create_query_plan(
+        &mut self,
+        schema: QueryResultSchema,
+        node: QueryPlanNode,
+    ) -> SubQueryTuples {
+        let tuples: Box<dyn NextTuple> = match node {
+            QueryPlanNode::Scan(node) => Box::new(self.evaluate_scan(node)),
+            QueryPlanNode::Filter(node) => Box::new(self.evaluate_filter(node)),
+            QueryPlanNode::Project(node) => Box::new(self.evaluate_project(node)),
+            QueryPlanNode::Join(node) => Box::new(self.evaluate_join(node)),
+        };
+
+        SubQueryTuples { schema, tuples }
     }
 }

@@ -26,7 +26,7 @@ impl std::fmt::Display for SerdeError {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Ord, PartialOrd)]
 pub enum StorageTupleValue {
     Integer(i32),
     Boolean(bool),

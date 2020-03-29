@@ -30,9 +30,11 @@ impl ExecutionPlan {
             Self::Query(QueryExecutionPlan {
                 plan: QueryPlanNode::Project(node),
             }) => Some(node.schema.clone()),
+            Self::Query(QueryExecutionPlan {
+                plan: QueryPlanNode::Join(node),
+            }) => Some(node.schema.clone()),
             Self::CreateTable(plan) => None,
             Self::InsertTuple(plan) => None,
-            _ => unimplemented!(),
         }
     }
 }

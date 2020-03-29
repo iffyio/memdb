@@ -15,3 +15,9 @@ pub struct Tuple {
     id: TupleId,
     record: TupleRecord,
 }
+
+impl TupleRecord {
+    pub fn concat(t1: &TupleRecord, t2: &TupleRecord) -> Self {
+        TupleRecord(vec![t1.0.clone(), t2.0.clone()].concat())
+    }
+}

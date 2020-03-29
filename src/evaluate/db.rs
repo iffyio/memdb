@@ -64,54 +64,141 @@ mod test {
     use crate::storage::tuple_serde::StorageTupleValue::Integer;
     use std::collections::HashMap;
 
+    fn execute_and_discard_result(db: &mut DB, stmt: Vec<&str>) {
+        stmt.into_iter()
+            .for_each(|stmt| db.execute(stmt).expect("invalid stmt").clear());
+    }
+
+    fn assert_tuples(
+        mut expected: Vec<Vec<(AttributeName, StorageTupleValue)>>,
+        mut actual: Vec<Vec<(AttributeName, StorageTupleValue)>>,
+    ) {
+        for mut tuples in vec![&mut expected, &mut actual] {
+            tuples.iter_mut().for_each(|mut tuple| tuple.sort());
+            tuples.sort();
+        }
+        assert_eq!(expected, actual);
+    }
+
     #[test]
     fn exec_query() {
         let mut db = DB::new();
-        db.execute("create table person (name varchar primary key, age integer);")
-            .unwrap();
-        db.execute("insert into person (name, age) values ('a', 1);")
-            .unwrap();
-        db.execute("insert into person (name, age) values ('b', 2);")
-            .unwrap();
-        db.execute("insert into person (name, age) values ('c', 3);")
-            .unwrap();
-        db.execute("insert into person (name, age) values ('d', 4);")
-            .unwrap();
+        execute_and_discard_result(
+            &mut db,
+            vec![
+                "create table person (name varchar primary key, age integer);",
+                "insert into person (name, age) values ('a', 1);",
+                "insert into person (name, age) values ('b', 2);",
+                "insert into person (name, age) values ('c', 3);",
+                "insert into person (name, age) values ('d', 4);",
+            ],
+        );
         {
-            let res = db
+            let mut res = db
                 .execute("select age, name from person where age <= 2;")
                 .unwrap();
-            assert_eq!(res.len(), 2);
 
-            assert!(res.contains(&vec![
-                (AttributeName("age".to_owned()), Integer(1)),
-                (
-                    AttributeName("name".to_owned()),
-                    StorageTupleValue::String("a".to_owned())
-                ),
-            ]));
-            assert!(res.contains(&vec![
-                (AttributeName("age".to_owned()), Integer(2)),
-                (
-                    AttributeName("name".to_owned()),
-                    StorageTupleValue::String("b".to_owned())
-                ),
-            ]));
+            assert_tuples(
+                vec![
+                    vec![
+                        (AttributeName("age".to_owned()), Integer(1)),
+                        (
+                            AttributeName("name".to_owned()),
+                            StorageTupleValue::String("a".to_owned()),
+                        ),
+                    ],
+                    vec![
+                        (AttributeName("age".to_owned()), Integer(2)),
+                        (
+                            AttributeName("name".to_owned()),
+                            StorageTupleValue::String("b".to_owned()),
+                        ),
+                    ],
+                ],
+                res,
+            );
         }
         {
             let mut res = db.execute("select * from person where age = 4;").unwrap();
-            assert_eq!(res.len(), 1);
+            assert_tuples(
+                vec![vec![
+                    (AttributeName("age".to_owned()), Integer(4)),
+                    (
+                        AttributeName("name".to_owned()),
+                        StorageTupleValue::String("d".to_owned()),
+                    ),
+                ]],
+                res,
+            );
+        }
+    }
 
-            for record in &mut res {
-                record.sort_by(|(_a, _), (_b, _)| _a.0.cmp(&_b.0));
-            }
-            assert!(res.contains(&vec![
-                (AttributeName("age".to_owned()), Integer(4)),
-                (
-                    AttributeName("name".to_owned()),
-                    StorageTupleValue::String("d".to_owned())
-                ),
-            ]));
+    #[test]
+    fn exec_inner_joins() {
+        let mut db = DB::new();
+
+        execute_and_discard_result(
+            &mut db,
+            vec![
+                "create table person (name varchar primary key, age integer);",
+                "insert into person (name, age) values ('a', 1);",
+                "insert into person (name, age) values ('b', 2);",
+                "insert into person (name, age) values ('c', 3);",
+                "insert into person (name, age) values ('d', 4);",
+                "create table employee (id varchar primary key, department varchar);",
+                "insert into employee (id, department) values ('a', 'ac');",
+                "insert into employee (id, department) values ('d', 'dc');",
+            ],
+        );
+        {
+            let res = db
+                .execute("select name, department from person inner join employee on name = id;")
+                .unwrap();
+
+            assert_tuples(
+                vec![
+                    vec![
+                        (
+                            AttributeName("name".to_owned()),
+                            StorageTupleValue::String("a".to_owned()),
+                        ),
+                        (
+                            AttributeName("department".to_owned()),
+                            StorageTupleValue::String("ac".to_owned()),
+                        ),
+                    ],
+                    vec![
+                        (
+                            AttributeName("name".to_owned()),
+                            StorageTupleValue::String("d".to_owned()),
+                        ),
+                        (
+                            AttributeName("department".to_owned()),
+                            StorageTupleValue::String("dc".to_owned()),
+                        ),
+                    ],
+                ],
+                res,
+            );
+        }
+        {
+            let res = db
+                .execute("select al.name, department from (select * from person where age < 3) as al inner join employee on al.name = id;")
+                .unwrap();
+
+            assert_eq!(
+                res,
+                vec![vec![
+                    (
+                        AttributeName("al.name".to_owned()),
+                        StorageTupleValue::String("a".to_owned())
+                    ),
+                    (
+                        AttributeName("department".to_owned()),
+                        StorageTupleValue::String("ac".to_owned())
+                    ),
+                ]]
+            );
         }
     }
 }
