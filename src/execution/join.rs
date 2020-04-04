@@ -69,6 +69,9 @@ impl InnerJoinOperation {
                         .push(TupleRecord::concat(&left.tuple, &right));
                 }
             }
+            if !self.joined_tuples_buffer.is_empty() {
+                break;
+            }
         }
         Ok(())
     }
@@ -93,26 +96,26 @@ mod test {
     use crate::execution::{NextTuple, ScanOperation, SubQueryTuples};
     use crate::parser::ast::{BinaryExpr, BinaryOperation, Expr, LiteralExpr};
     use crate::planner::plan::query_plan::QueryResultSchema;
-    use crate::storage::storage_manager::AttributeName;
+    use crate::storage::storage_manager::{AttributeName, Attributes};
     use crate::storage::tuple_serde::{deserialize_tuple, serialize_tuple, StorageTupleValue};
     use crate::storage::types::AttributeType;
 
     #[test]
     fn join() {
-        let left_schema = QueryResultSchema::new(vec![
+        let left_schema = QueryResultSchema::new(Attributes::new(vec![
             (AttributeName("name".to_owned()), AttributeType::Text),
             (AttributeName("age".to_owned()), AttributeType::Integer),
-        ]);
-        let right_schema = QueryResultSchema::new(vec![
+        ]));
+        let right_schema = QueryResultSchema::new(Attributes::new(vec![
             (AttributeName("id".to_owned()), AttributeType::Text),
             (AttributeName("department".to_owned()), AttributeType::Text),
-        ]);
-        let join_schema = QueryResultSchema::new(vec![
+        ]));
+        let join_schema = QueryResultSchema::new(Attributes::new(vec![
             (AttributeName("name".to_owned()), AttributeType::Text),
             (AttributeName("age".to_owned()), AttributeType::Integer),
             (AttributeName("id".to_owned()), AttributeType::Text),
             (AttributeName("department".to_owned()), AttributeType::Text),
-        ]);
+        ]));
 
         let left_input = SubQueryTuples {
             schema: left_schema.clone().with_alias("person"),

@@ -14,7 +14,7 @@ use crate::planner::plan::query_plan::{
 use crate::planner::plan::Plan;
 use crate::storage::error::StorageError;
 use crate::storage::storage_manager::{
-    AttributeName, CreateTableRequest, Schema, StorageManager, TableName,
+    AttributeName, Attributes, CreateTableRequest, Schema, StorageManager, TableName,
 };
 use crate::storage::tuple_serde::{serialize_tuple, StorageTupleValue};
 use crate::storage::types::AttributeType as StorageAttributeType;
@@ -289,7 +289,8 @@ impl<'storage> Translator<'storage> {
             .cloned()
             .collect();
 
-        let joined_records_schema = QueryResultSchema::new(joined_record_attributes);
+        let joined_records_schema =
+            QueryResultSchema::new(Attributes::new(joined_record_attributes));
         let ctx = joined_records_schema.attributes.as_lookup_table();
         let predicate_expr = type_check_join_predicate(predicate, &ctx)?;
 
@@ -381,7 +382,7 @@ impl<'storage> Translator<'storage> {
 
         let aliased_schema_lookup = aliased_result_schema.attributes.as_lookup_table();
 
-        let projection_result_schema = QueryResultSchema::with_attributes(type_check_projection(
+        let projection_result_schema = QueryResultSchema::new(type_check_projection(
             &projected_attr_names,
             &aliased_schema_lookup,
         )?);
@@ -393,11 +394,6 @@ impl<'storage> Translator<'storage> {
             plan: QueryPlanNode::Project(ProjectNode {
                 schema: projection_result_schema.clone(),
                 record_schema: child_record_schema,
-                // TODO remove if not neccessary.
-                attributes: projected_attr_names
-                    .into_iter()
-                    .map(|attr| AttributeName(attr.clone()))
-                    .collect(),
                 child: Box::new(child_plan),
             }),
         })
@@ -427,7 +423,7 @@ mod test {
     };
     use crate::planner::plan::Plan::{self, CreateTable};
     use crate::storage::storage_manager::{
-        AttributeName, CreateTableRequest, Schema, StorageManager, TableName,
+        AttributeName, Attributes, CreateTableRequest, Schema, StorageManager, TableName,
     };
     use crate::storage::tuple::{StoreId, TupleRecord};
     use crate::storage::types::{AttributeType as StorageAttributeType, AttributeType};
@@ -546,7 +542,7 @@ mod test {
 
         let plan = t.translate_select(stmt)?;
 
-        let schema = QueryResultSchema::new(schema_attributes.clone());
+        let schema = QueryResultSchema::new(Attributes::new(schema_attributes.clone()));
         assert_eq!(
             plan,
             Plan::Query(QueryPlan {
@@ -612,14 +608,14 @@ mod test {
 
         let plan = t.translate_select(stmt)?;
 
-        let schema = QueryResultSchema::new(schema_attributes.clone());
-        let result_schema = QueryResultSchema::new(vec![
+        let schema = QueryResultSchema::new(Attributes::new(schema_attributes.clone()));
+        let result_schema = QueryResultSchema::new(Attributes::new(vec![
             (
                 AttributeName("is_member".to_owned()),
                 AttributeType::Boolean,
             ),
             (AttributeName("age".to_owned()), AttributeType::Integer),
-        ]);
+        ]));
         assert_eq!(
             plan,
             Plan::Query(QueryPlan {
@@ -627,10 +623,6 @@ mod test {
                 plan: QueryPlanNode::Project(ProjectNode {
                     schema: result_schema.clone(),
                     record_schema: schema.clone(),
-                    attributes: vec![
-                        AttributeName("is_member".to_owned()),
-                        AttributeName("age".to_owned())
-                    ],
                     child: Box::new(QueryPlan {
                         result_schema: schema.clone(),
                         plan: QueryPlanNode::Filter(FilterNode {
@@ -687,8 +679,8 @@ mod test {
 
         let plan = t.translate_select(stmt)?;
 
-        let schema = QueryResultSchema::new(schema_attributes.clone());
-        let result_schema = QueryResultSchema::new(vec![
+        let schema = QueryResultSchema::new(Attributes::new(schema_attributes.clone()));
+        let result_schema = QueryResultSchema::new(Attributes::new(vec![
             (
                 AttributeName("employee.is_member".to_owned()),
                 AttributeType::Boolean,
@@ -697,7 +689,7 @@ mod test {
                 AttributeName("employee.age".to_owned()),
                 AttributeType::Integer,
             ),
-        ]);
+        ]));
         assert_eq!(
             plan,
             Plan::Query(QueryPlan {
@@ -705,10 +697,6 @@ mod test {
                 plan: QueryPlanNode::Project(ProjectNode {
                     schema: result_schema.clone(),
                     record_schema: schema.clone(),
-                    attributes: vec![
-                        AttributeName("employee.is_member".to_owned()),
-                        AttributeName("employee.age".to_owned())
-                    ],
                     child: Box::new(QueryPlan {
                         result_schema: schema.clone(),
                         plan: QueryPlanNode::Scan(ScanNode {
@@ -810,8 +798,8 @@ mod test {
 
         let plan = t.translate_select(stmt)?;
 
-        let schema = QueryResultSchema::new(schema_attributes.clone());
-        let join_schema = QueryResultSchema::new(vec![
+        let schema = QueryResultSchema::new(Attributes::new(schema_attributes.clone()));
+        let join_schema = QueryResultSchema::new(Attributes::new(vec![
             (AttributeName("person.name".to_owned()), AttributeType::Text),
             (
                 AttributeName("person.age".to_owned()),
@@ -825,8 +813,8 @@ mod test {
                 AttributeName("employee.age".to_owned()),
                 AttributeType::Integer,
             ),
-        ]);
-        let projection_schema = QueryResultSchema::new(vec![
+        ]));
+        let projection_schema = QueryResultSchema::new(Attributes::new(vec![
             (
                 AttributeName("person.age".to_owned()),
                 AttributeType::Integer,
@@ -835,17 +823,13 @@ mod test {
                 AttributeName("employee.name".to_owned()),
                 AttributeType::Text,
             ),
-        ]);
+        ]));
         assert_eq!(
             Plan::Query(QueryPlan {
                 result_schema: projection_schema.clone(),
                 plan: QueryPlanNode::Project(ProjectNode {
                     schema: projection_schema.clone(),
                     record_schema: join_schema.clone(),
-                    attributes: vec![
-                        AttributeName("person.age".to_owned()),
-                        AttributeName("employee.name".to_owned())
-                    ],
                     child: Box::new(QueryPlan {
                         result_schema: join_schema.clone(),
                         plan: QueryPlanNode::Join(JoinNode {

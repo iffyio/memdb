@@ -11,19 +11,14 @@ pub struct QueryResultSchema {
 
 impl From<Schema> for QueryResultSchema {
     fn from(schema: Schema) -> Self {
-        QueryResultSchema::new(schema.attributes.attributes_iter().cloned().collect())
+        QueryResultSchema::new(Attributes::new(
+            schema.attributes.attributes_iter().cloned().collect(),
+        ))
     }
 }
 
 impl QueryResultSchema {
-    // TODO: replace with with_attributes
-    pub fn new(attributes: Vec<(AttributeName, AttributeType)>) -> Self {
-        QueryResultSchema {
-            attributes: Attributes::new(attributes),
-        }
-    }
-
-    pub fn with_attributes(attributes: Attributes) -> Self {
+    pub fn new(attributes: Attributes) -> Self {
         QueryResultSchema { attributes }
     }
 
@@ -58,8 +53,6 @@ pub(crate) struct FilterNode {
 pub(crate) struct ProjectNode {
     pub schema: QueryResultSchema,
     pub record_schema: QueryResultSchema,
-    // TODO no need to pass attributes if we can infer it from the result schema ^
-    pub attributes: Vec<AttributeName>,
     pub child: Box<QueryPlan>,
 }
 

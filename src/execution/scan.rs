@@ -31,17 +31,18 @@ impl<'storage> Tuples<'storage> {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ScanOperation {
-    tuples: Vec<TupleRecord>,
+    tuples: Vec<Option<TupleRecord>>,
     index: usize,
 }
 
 impl NextTuple for ScanOperation {
     fn next(&mut self) -> TupleResult {
         if self.index < self.tuples.len() {
-            // TODO we don't clone since we don't need the tuple after returning it.
-            let t = self.tuples[self.index].clone();
+            let mut t = &mut self.tuples[self.index];
             self.index += 1;
-            Some(Ok(t))
+            Some(Ok(t
+                .take()
+                .expect("tuple exists since we haven't previously taken it")))
         } else {
             None
         }
@@ -50,7 +51,10 @@ impl NextTuple for ScanOperation {
 
 impl ScanOperation {
     pub fn new(tuples: Vec<TupleRecord>) -> Self {
-        ScanOperation { tuples, index: 0 }
+        ScanOperation {
+            tuples: tuples.into_iter().map(|t| Some(t)).collect(),
+            index: 0,
+        }
     }
 }
 

@@ -121,14 +121,18 @@ impl<'storage> Evaluation<'storage> {
     fn evaluate_project(&mut self, node: ProjectNode) -> ProjectOperation {
         let ProjectNode {
             record_schema,
-            attributes,
             child,
-            schema: _,
+            schema,
         } = node;
         let sub_query = self.create_query_plan(child.result_schema, child.plan);
+        let projected_attributes = schema
+            .attributes
+            .attributes_iter()
+            .map(|(attr_name, _)| attr_name.clone())
+            .collect::<Vec<_>>();
         ProjectOperation {
             record_schema,
-            projected_attributes: attributes,
+            projected_attributes,
             input: sub_query.tuples,
         }
     }
